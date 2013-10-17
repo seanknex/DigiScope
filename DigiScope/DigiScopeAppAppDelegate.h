@@ -7,6 +7,7 @@
 //
 
 // This is a test of my pushing ability
+//This is another test
 #import <UIKit/UIKit.h>
 
 @interface DigiScopeAppAppDelegate : UIResponder <UIApplicationDelegate>
