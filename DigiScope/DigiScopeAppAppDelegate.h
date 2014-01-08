@@ -6,11 +6,17 @@
 //  Copyright (c) 2013 Sound the Bell. All rights reserved.
 //
 
-// This is a test of my pushing ability
-//This is another test
 #import <UIKit/UIKit.h>
 
-@interface DigiScopeAppAppDelegate : UIResponder <UIApplicationDelegate>
+@interface DigiScopeAppAppDelegate : UIResponder <UIApplicationDelegate>{
+	
+}
+
+@property (readonly, strong, nonatomic) NSManagedObjectContext *managedObjectContext;
+@property (readonly, strong, nonatomic) NSManagedObjectModel *managedObjectModel;
+@property (readonly, strong, nonatomic) NSPersistentStoreCoordinator *persistentStoreCoordinator;
+
+- (NSURL *)applicationDocumentsDirectory;
 
 @property (strong, nonatomic) UIWindow *window;
 

@@ -7,6 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		18101CE6184F794100F17259 /* DigiScope.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 18101CE4184F794100F17259 /* DigiScope.xcdatamodeld */; };
+		18101D2A184F819D00F17259 /* Recording.m in Sources */ = {isa = PBXBuildFile; fileRef = 18101D29184F819D00F17259 /* Recording.m */; };
+		18101D30184F86C500F17259 /* UIPopoverOverride.m in Sources */ = {isa = PBXBuildFile; fileRef = 18101D2F184F86C500F17259 /* UIPopoverOverride.m */; };
+		18101D32185293D600F17259 /* MessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18101D31185293D600F17259 /* MessageUI.framework */; };
+		1841316E184CE366002CA705 /* AudioController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1841316D184CE366002CA705 /* AudioController.mm */; };
+		18413170184CE38D002CA705 /* MediaPlayer.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1841316F184CE38D002CA705 /* MediaPlayer.framework */; };
+		18413172184CE395002CA705 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18413171184CE395002CA705 /* AudioToolbox.framework */; };
+		18413174184CE3A1002CA705 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18413173184CE3A1002CA705 /* AVFoundation.framework */; };
+		18413176184CE3AA002CA705 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18413175184CE3AA002CA705 /* CoreAudio.framework */; };
+		18413178184CE3B4002CA705 /* CoreData.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18413177184CE3B4002CA705 /* CoreData.framework */; };
+		1841317B184CE43F002CA705 /* GlobalVar.m in Sources */ = {isa = PBXBuildFile; fileRef = 1841317A184CE43F002CA705 /* GlobalVar.m */; };
+		18413181184CECD8002CA705 /* LiveViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 18413180184CECD8002CA705 /* LiveViewController.mm */; };
+		1841318D184E2E07002CA705 /* CADebugMacros.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 18413185184E2E07002CA705 /* CADebugMacros.cpp */; };
+		1841318E184E2E07002CA705 /* CAXException.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 18413187184E2E07002CA705 /* CAXException.cpp */; };
+		18413190184E2E07002CA705 /* CADebugPrintf.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1841318B184E2E07002CA705 /* CADebugPrintf.cpp */; };
+		18547234187C5850009759D2 /* CAStreamBasicDescription.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 18547232187C5850009759D2 /* CAStreamBasicDescription.cpp */; };
+		18547237187C5D69009759D2 /* EAGLView.m in Sources */ = {isa = PBXBuildFile; fileRef = 18547236187C5D69009759D2 /* EAGLView.m */; };
 		18C61A33180DACC3008B14D6 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18C61A32180DACC3008B14D6 /* Foundation.framework */; };
 		18C61A35180DACC3008B14D6 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18C61A34180DACC3008B14D6 /* CoreGraphics.framework */; };
 		18C61A37180DACC3008B14D6 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18C61A36180DACC3008B14D6 /* UIKit.framework */; };
@@ -35,6 +52,35 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		18101CE5184F794100F17259 /* DigiScope.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = DigiScope.xcdatamodel; sourceTree = "<group>"; };
+		18101D28184F819D00F17259 /* Recording.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Recording.h; sourceTree = "<group>"; };
+		18101D29184F819D00F17259 /* Recording.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Recording.m; sourceTree = "<group>"; };
+		18101D2E184F86C500F17259 /* UIPopoverOverride.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = UIPopoverOverride.h; sourceTree = "<group>"; };
+		18101D2F184F86C500F17259 /* UIPopoverOverride.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = UIPopoverOverride.m; sourceTree = "<group>"; };
+		18101D31185293D600F17259 /* MessageUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MessageUI.framework; path = System/Library/Frameworks/MessageUI.framework; sourceTree = SDKROOT; };
+		1841316C184CE366002CA705 /* AudioController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AudioController.h; sourceTree = "<group>"; };
+		1841316D184CE366002CA705 /* AudioController.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = AudioController.mm; sourceTree = "<group>"; };
+		1841316F184CE38D002CA705 /* MediaPlayer.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MediaPlayer.framework; path = System/Library/Frameworks/MediaPlayer.framework; sourceTree = SDKROOT; };
+		18413171184CE395002CA705 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		18413173184CE3A1002CA705 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		18413175184CE3AA002CA705 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		18413177184CE3B4002CA705 /* CoreData.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreData.framework; path = System/Library/Frameworks/CoreData.framework; sourceTree = SDKROOT; };
+		18413179184CE43F002CA705 /* GlobalVar.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GlobalVar.h; sourceTree = "<group>"; };
+		1841317A184CE43F002CA705 /* GlobalVar.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GlobalVar.m; sourceTree = "<group>"; };
+		1841317F184CECD8002CA705 /* LiveViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LiveViewController.h; sourceTree = "<group>"; };
+		18413180184CECD8002CA705 /* LiveViewController.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = LiveViewController.mm; sourceTree = "<group>"; };
+		18413183184E2E07002CA705 /* CABitOperations.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CABitOperations.h; sourceTree = "<group>"; };
+		18413184184E2E07002CA705 /* CADebugMacros.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CADebugMacros.h; sourceTree = "<group>"; };
+		18413185184E2E07002CA705 /* CADebugMacros.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = CADebugMacros.cpp; sourceTree = "<group>"; };
+		18413186184E2E07002CA705 /* CAXException.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CAXException.h; sourceTree = "<group>"; };
+		18413187184E2E07002CA705 /* CAXException.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = CAXException.cpp; sourceTree = "<group>"; };
+		18413188184E2E07002CA705 /* CAMath.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CAMath.h; sourceTree = "<group>"; };
+		1841318B184E2E07002CA705 /* CADebugPrintf.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = CADebugPrintf.cpp; sourceTree = "<group>"; };
+		1841318C184E2E07002CA705 /* CADebugPrintf.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CADebugPrintf.h; sourceTree = "<group>"; };
+		18547232187C5850009759D2 /* CAStreamBasicDescription.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = CAStreamBasicDescription.cpp; sourceTree = "<group>"; };
+		18547233187C5850009759D2 /* CAStreamBasicDescription.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CAStreamBasicDescription.h; sourceTree = "<group>"; };
+		18547235187C5D69009759D2 /* EAGLView.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = EAGLView.h; sourceTree = "<group>"; };
+		18547236187C5D69009759D2 /* EAGLView.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = EAGLView.m; sourceTree = "<group>"; };
 		18C61A2F180DACC3008B14D6 /* DigiScope.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DigiScope.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		18C61A32180DACC3008B14D6 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		18C61A34180DACC3008B14D6 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
@@ -62,6 +108,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				18101D32185293D600F17259 /* MessageUI.framework in Frameworks */,
+				18413178184CE3B4002CA705 /* CoreData.framework in Frameworks */,
+				18413176184CE3AA002CA705 /* CoreAudio.framework in Frameworks */,
+				18413174184CE3A1002CA705 /* AVFoundation.framework in Frameworks */,
+				18413172184CE395002CA705 /* AudioToolbox.framework in Frameworks */,
+				18413170184CE38D002CA705 /* MediaPlayer.framework in Frameworks */,
 				18C61A35180DACC3008B14D6 /* CoreGraphics.framework in Frameworks */,
 				18C61A37180DACC3008B14D6 /* UIKit.framework in Frameworks */,
 				18C61A33180DACC3008B14D6 /* Foundation.framework in Frameworks */,
@@ -81,6 +133,23 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		18413182184E2DF0002CA705 /* iPublicUtility */ = {
+			isa = PBXGroup;
+			children = (
+				18413183184E2E07002CA705 /* CABitOperations.h */,
+				18413184184E2E07002CA705 /* CADebugMacros.h */,
+				18413185184E2E07002CA705 /* CADebugMacros.cpp */,
+				18413186184E2E07002CA705 /* CAXException.h */,
+				18413187184E2E07002CA705 /* CAXException.cpp */,
+				18413188184E2E07002CA705 /* CAMath.h */,
+				1841318B184E2E07002CA705 /* CADebugPrintf.cpp */,
+				1841318C184E2E07002CA705 /* CADebugPrintf.h */,
+				18547232187C5850009759D2 /* CAStreamBasicDescription.cpp */,
+				18547233187C5850009759D2 /* CAStreamBasicDescription.h */,
+			);
+			name = iPublicUtility;
+			sourceTree = "<group>";
+		};
 		18C61A26180DACC3008B14D6 = {
 			isa = PBXGroup;
 			children = (
@@ -103,6 +172,12 @@
 		18C61A31180DACC3008B14D6 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				18101D31185293D600F17259 /* MessageUI.framework */,
+				18413177184CE3B4002CA705 /* CoreData.framework */,
+				18413175184CE3AA002CA705 /* CoreAudio.framework */,
+				18413173184CE3A1002CA705 /* AVFoundation.framework */,
+				18413171184CE395002CA705 /* AudioToolbox.framework */,
+				1841316F184CE38D002CA705 /* MediaPlayer.framework */,
 				18C61A32180DACC3008B14D6 /* Foundation.framework */,
 				18C61A34180DACC3008B14D6 /* CoreGraphics.framework */,
 				18C61A36180DACC3008B14D6 /* UIKit.framework */,
@@ -120,6 +195,16 @@
 				18C61A47180DACC4008B14D6 /* Main_iPad.storyboard */,
 				18C61A4A180DACC4008B14D6 /* DigiScopeAppViewController.h */,
 				18C61A4B180DACC4008B14D6 /* DigiScopeAppViewController.m */,
+				1841317F184CECD8002CA705 /* LiveViewController.h */,
+				18413180184CECD8002CA705 /* LiveViewController.mm */,
+				18413179184CE43F002CA705 /* GlobalVar.h */,
+				1841317A184CE43F002CA705 /* GlobalVar.m */,
+				1841316C184CE366002CA705 /* AudioController.h */,
+				1841316D184CE366002CA705 /* AudioController.mm */,
+				18547235187C5D69009759D2 /* EAGLView.h */,
+				18547236187C5D69009759D2 /* EAGLView.m */,
+				18101D2E184F86C500F17259 /* UIPopoverOverride.h */,
+				18101D2F184F86C500F17259 /* UIPopoverOverride.m */,
 				18C61A4D180DACC4008B14D6 /* Images.xcassets */,
 				18C61A39180DACC3008B14D6 /* Supporting Files */,
 			);
@@ -129,10 +214,14 @@
 		18C61A39180DACC3008B14D6 /* Supporting Files */ = {
 			isa = PBXGroup;
 			children = (
+				18101CE4184F794100F17259 /* DigiScope.xcdatamodeld */,
+				18101D28184F819D00F17259 /* Recording.h */,
+				18101D29184F819D00F17259 /* Recording.m */,
 				18C61A3A180DACC3008B14D6 /* DigiScope-Info.plist */,
 				18C61A3B180DACC3008B14D6 /* InfoPlist.strings */,
 				18C61A3E180DACC3008B14D6 /* main.m */,
 				18C61A40180DACC3008B14D6 /* DigiScope-Prefix.pch */,
+				18413182184E2DF0002CA705 /* iPublicUtility */,
 			);
 			name = "Supporting Files";
 			sourceTree = "<group>";
@@ -254,9 +343,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				18413181184CECD8002CA705 /* LiveViewController.mm in Sources */,
+				1841316E184CE366002CA705 /* AudioController.mm in Sources */,
 				18C61A43180DACC3008B14D6 /* DigiScopeAppAppDelegate.m in Sources */,
+				18547237187C5D69009759D2 /* EAGLView.m in Sources */,
 				18C61A3F180DACC3008B14D6 /* main.m in Sources */,
+				1841318E184E2E07002CA705 /* CAXException.cpp in Sources */,
+				18101D2A184F819D00F17259 /* Recording.m in Sources */,
+				18101CE6184F794100F17259 /* DigiScope.xcdatamodeld in Sources */,
+				18413190184E2E07002CA705 /* CADebugPrintf.cpp in Sources */,
 				18C61A4C180DACC4008B14D6 /* DigiScopeAppViewController.m in Sources */,
+				18547234187C5850009759D2 /* CAStreamBasicDescription.cpp in Sources */,
+				1841318D184E2E07002CA705 /* CADebugMacros.cpp in Sources */,
+				1841317B184CE43F002CA705 /* GlobalVar.m in Sources */,
+				18101D30184F86C500F17259 /* UIPopoverOverride.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -475,6 +575,7 @@
 				18C61A66180DACC4008B14D6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 		18C61A67180DACC4008B14D6 /* Build configuration list for PBXNativeTarget "DigiScopeTests" */ = {
 			isa = XCConfigurationList;
@@ -483,8 +584,22 @@
 				18C61A69180DACC4008B14D6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCVersionGroup section */
+		18101CE4184F794100F17259 /* DigiScope.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				18101CE5184F794100F17259 /* DigiScope.xcdatamodel */,
+			);
+			currentVersion = 18101CE5184F794100F17259 /* DigiScope.xcdatamodel */;
+			path = DigiScope.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
 	};
 	rootObject = 18C61A27180DACC3008B14D6 /* Project object */;
 }
