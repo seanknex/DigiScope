@@ -18,27 +18,35 @@
 
 // Draw Specifications
 
-#define kNumDrawBuffers 6
-#define kNumECGDrawBuffers 2
+#define kNumDrawBuffers 1
+#define kNumECGDrawBuffers 1
 #define kDefaultDrawSamples 1024
 #define kMinDrawSamples 64
 #define kMaxDrawSamples 4096
 
 SInt8 *drawBuffers[kNumDrawBuffers];
-SInt8 *ECGBuffers[kNumECGDrawBuffers];
+SInt8 *ECGBuffer;
 int drawBufferIdx = 0;
 int ECGDrawBufferIdx = 0;
 int drawBufferLen = kDefaultDrawSamples;
 int ECGBufferLen = 4096;
 int drawBufferLen_alloced = 0;
 int ECGBuferLen_alloced = 0;
-int currentECGBuffer = 0;
-BOOL ECGInUse = FALSE;
+float gg = 0.;
+float gr = 0.;
+float gb = 0.;
+float lg = 0.;
+float lr = 0.;
+float lb = 1.;
+double averageECGValue;
+BOOL ECGInUse = TRUE;
+BOOL ECGRecordingRequest = FALSE;
 
 @implementation AudioController
-@synthesize myAppDelegate, fetchedRecordings, loadFromData, viewDelegate, hardwareAttached, view;
+@synthesize myAppDelegate, fetchedRecordings, loadFromData, viewDelegate, hardwareAttached, view, requestingController;
 
 #pragma mark Shared Instance
+
 
 +(AudioController *)sharedInstance{
 	static AudioController *myInstance = nil;
@@ -55,7 +63,7 @@ void cycleOscilloscopeLines()
 {
 	// Cycle the lines in our draw buffer so that they age and fade. The oldest line is discarded.
 	int drawBuffer_i;
-	for (drawBuffer_i=(kNumDrawBuffers - 2); drawBuffer_i>=0; drawBuffer_i--)
+	for (drawBuffer_i=(kNumDrawBuffers - 2); drawBuffer_i>=0; drawBuffer_i--) // 3
 			memmove(drawBuffers[drawBuffer_i + 1], drawBuffers[drawBuffer_i], drawBufferLen);
 }
 
@@ -68,14 +76,13 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	OSStatus err = AudioUnitRender(THIS->ioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData);
 	
 	{
-		
 		// The draw buffer is used to hold a copy of the most recent PCM data to be drawn
 		if (drawBufferLen != drawBufferLen_alloced)
 		{
 			int drawBuffer_i;
 			// Allocate our draw buffer if needed
 			if (drawBufferLen_alloced == 0)
-				for (drawBuffer_i=0; drawBuffer_i<kNumDrawBuffers; drawBuffer_i++)
+				for (drawBuffer_i=0; drawBuffer_i<kNumDrawBuffers; drawBuffer_i++) // 1
 					drawBuffers[drawBuffer_i] = NULL;
 			
 			// Fill the first element in the draw buffer with PCM data
@@ -93,22 +100,14 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		// The draw buffer is used to hold a copy of the most recent PCM data to be drawn
 		if (ECGBufferLen != ECGBuferLen_alloced)
 		{
-			int drawBuffer_i;
 			// Allocate our draw buffer if needed
 			if (ECGBuferLen_alloced == 0)
-				for (drawBuffer_i=0; drawBuffer_i<kNumECGDrawBuffers; drawBuffer_i++)
-					ECGBuffers[drawBuffer_i] = NULL;
+				ECGBuffer = NULL;
 			
-			// Fill the first element in the draw buffer with PCM data
-			for (drawBuffer_i=0; drawBuffer_i<kNumECGDrawBuffers; drawBuffer_i++)
-			{
-				ECGBuffers[drawBuffer_i] = (SInt8 *)realloc(ECGBuffers[drawBuffer_i], ECGBufferLen);
-				bzero(ECGBuffers[drawBuffer_i], ECGBufferLen);
-				//printf("%s",drawBuffers[drawBuffer_i]);
-				
-			}
+			ECGBuffer = (SInt8 *)realloc(ECGBuffer, ECGBufferLen);
+			bzero(ECGBuffer, ECGBufferLen);
 			
-			drawBufferLen_alloced = drawBufferLen;
+			ECGBuferLen_alloced = ECGBufferLen;
 		}
 		
 		int i;
@@ -122,10 +121,11 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 			printf("AudioConverterConvertComplexBuffer: error %d\n", (int)err);
 			return err;
 		}
-        
 		
 		SInt8 *data_ptr = (SInt8 *)(THIS->drawABL->mBuffers[0].mData);
-		for (i=0; i<inNumberFrames; i++)
+		averageECGValue = 0;
+		
+		for (i=1; i<inNumberFrames; i++)
 		{
 			if (!ECGInUse) {
 				if ((i+drawBufferIdx) >= drawBufferLen)
@@ -133,25 +133,32 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 					cycleOscilloscopeLines();
 					drawBufferIdx = -i;
 				}
-				drawBuffers[0][i + drawBufferIdx] = data_ptr[2];
+				
+				drawBuffers[0][i + drawBufferIdx] = data_ptr[2]; // 2
 				ECGDrawBufferIdx = 0;
 			}
 			else{
-				if ((i+ECGDrawBufferIdx) >= ECGBufferLen){
-					ECGDrawBufferIdx = -i;
-					if (currentECGBuffer)
-						currentECGBuffer = 0;
-					else
-						currentECGBuffer = 1;
-				}
-				ECGBuffers[currentECGBuffer][i + drawBufferIdx] = data_ptr[2];
+				averageECGValue += data_ptr[2]*data_ptr[2];
 				drawBufferIdx = 0;
+				
+				if ((i+1)%64 == 0) {
+					ECGBuffer[ECGDrawBufferIdx] = sqrtf(averageECGValue/64.);
+					ECGDrawBufferIdx++;
+					averageECGValue = 0;
+				}
+				
+				// Readjust ECGDrawBufferIdx if needed
+				if (ECGDrawBufferIdx >= ECGBufferLen)
+					ECGDrawBufferIdx = 0;
 			}
 			data_ptr += 4;
 		}
 		
 		drawBufferIdx += inNumberFrames;
-		ECGDrawBufferIdx += inNumberFrames;
+		
+		
+		
+		
 
 	}
 	
@@ -276,6 +283,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	}
 	
 	oscilLine = (GLfloat*)malloc(drawBufferLen * 2 * sizeof(GLfloat));
+	ECGoscilLine = (GLfloat*)malloc(ECGBufferLen * 2 * sizeof(GLfloat));
 	
 	thruFormat = CAStreamBasicDescription(44100, kAudioFormatLinearPCM, 4, 1, 4, 2, 32, kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked | kAudioFormatFlagIsFloat | kAudioFormatFlagIsNonInterleaved);
 	drawFormat.SetAUCanonical(2, false);
@@ -338,7 +346,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	if (error != nil)
 		NSLog(@"\nError in Setting the Preferred Sample Rate: %@", [error localizedDescription]);
 	
-	[AudioSession setPreferredIOBufferDuration:23.0 error:&error];
+	[AudioSession setPreferredIOBufferDuration:0.1 error:&error];
 	if (error) NSLog(@"Error in Setting Buffer Duration");
 	error = nil;
 	
@@ -400,12 +408,19 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		NSLog(@"\nError, Recorder did not prepare");
 }
 
-+(void)startRecording{
++(void)startRecordingFromController:(UIViewController *)controller{
 	if (![[AudioController sharedInstance]->RecordingController isRecording]){
-		[self initializeRecorder];
-		BOOL success = [[AudioController sharedInstance]->RecordingController record];
-		if (!success)
-			NSLog(@"\nError, Recorder did not start recording");
+		if (ECGInUse) {
+			ECGRecordingRequest = TRUE;
+			[AudioController sharedInstance]->requestingController = controller;
+		}
+		else{
+			[self initializeRecorder];
+			BOOL success = [[AudioController sharedInstance]->RecordingController record];
+			if (!success)
+				NSLog(@"\nError, Recorder did not start recording");
+		}
+		
 			
 	}
 	else
@@ -669,7 +684,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 	
-	glColor4f(1., 1., 1., 1.);
+	glColor4f(gr, gg, gb, 1.);
 	
 	glPushMatrix();
 	
@@ -714,6 +729,11 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		resetOscilLine = NO;
 	}
 	
+	if (resetECGOscilLine) {
+		ECGoscilLine = (GLfloat*)realloc(ECGoscilLine, ECGBufferLen * 2 * sizeof(GLfloat));
+		resetECGOscilLine = NO;
+	}
+	
 	glPushMatrix();
 	
 	// Translate to the left side and vertical center of the screen, and scale so that the screen coordinates
@@ -746,35 +766,69 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	
 	int drawBuffer_i;
 	// Draw a line for each stored line in our buffer (the lines are stored and fade over time)
-	for (drawBuffer_i=0; drawBuffer_i<kNumDrawBuffers; drawBuffer_i++)
-	{
-		
-		if (!drawBuffers[drawBuffer_i]) continue;
-		
-		oscilLine_ptr = oscilLine;
-		drawBuffer_ptr = drawBuffers[drawBuffer_i];
+	if (ECGInUse) {
 		
 		GLfloat i;
-		// Fill our vertex array with points
-		for (i=0.; i<max; i=i+1.)
-		{
-			*oscilLine_ptr++ = i/max;
-			*oscilLine_ptr++ = (Float32)(*drawBuffer_ptr++) / 128.;
-		}
+		oscilLine_ptr = ECGoscilLine;
+		drawBuffer_ptr = ECGBuffer;
 		
-		// If we're drawing the newest line, draw it in solid green. Otherwise, draw it in a faded green.
-		if (drawBuffer_i == 0)
-			glColor4f(1., 0., 0., 1.);
-		else
-			glColor4f(1., 0., 0., (.24 * (1. - ((GLfloat)drawBuffer_i / (GLfloat)kNumDrawBuffers))));
+		for (i=0; i<ECGBufferLen; i++) {
+			*oscilLine_ptr++ = i/ECGBufferLen;
+			*oscilLine_ptr++ = (Float32)(*drawBuffer_ptr++)/128.;
+		}
+		glColor4f(lr, lg, lb, 1.);
 		
 		// Set up vertex pointer,
-		glVertexPointer(2, GL_FLOAT, 0, oscilLine);
+		glVertexPointer(2, GL_FLOAT, 0, ECGoscilLine);
 		
-		// and draw the line.
-		glDrawArrays(GL_LINE_STRIP, 0, drawBufferLen);
+		// and draw first line.
+		glDrawArrays(GL_LINE_STRIP, 0, ECGDrawBufferIdx-1);
+		
+		// Readjust Alpha
+		glColor4f(lr, lg, lb, (.5-.3*ECGDrawBufferIdx/ECGBufferLen));
+		
+		glDrawArrays(GL_LINE_STRIP, ECGDrawBufferIdx, ECGBufferLen-ECGDrawBufferIdx-1);
+		
+		// Check for if the user requested a recording and terminate drawing
+		if (ECGRecordingRequest && ECGDrawBufferIdx == ECGBufferLen) {
+			[[AudioController sharedInstance]->view stopAnimation];
+			ECGRecordingRequest = FALSE;
+		}
+		 
 		
 	}
+	else{
+		for (drawBuffer_i=0; drawBuffer_i<kNumDrawBuffers; drawBuffer_i++)
+		{
+			
+			if (!drawBuffers[drawBuffer_i]) continue; // 4
+			
+			oscilLine_ptr = oscilLine;
+			drawBuffer_ptr = drawBuffers[drawBuffer_i];
+			
+			GLfloat i;
+			// Fill our vertex array with points
+			for (i=0.; i<max; i=i+1.)
+			{
+				*oscilLine_ptr++ = i/max;
+				*oscilLine_ptr++ = (Float32)(*drawBuffer_ptr++) / 128.;
+			}
+			
+			// If we're drawing the newest line, draw it in solid green. Otherwise, draw it in a faded green.
+			if (drawBuffer_i == 0)
+				glColor4f(lr, lg, lb, 1.);
+			else
+				glColor4f(lr, lg, lb, (.24 * (1. - ((GLfloat)drawBuffer_i / (GLfloat)kNumDrawBuffers))));
+			
+			// Set up vertex pointer,
+			glVertexPointer(2, GL_FLOAT, 0, oscilLine);
+			
+			// and draw the line.
+			glDrawArrays(GL_LINE_STRIP, 0, drawBufferLen);
+			
+		}
+	}
+	
 	
 	glPopMatrix();
     
@@ -788,7 +842,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 }
 
 +(void)setView:(EAGLView *)view{
-	[[AudioController sharedInstance]setView:view];
+	[[AudioController sharedInstance] setView:view];
 }
 
 -(void)setView:(EAGLView *)EAGLViewFrame{
@@ -797,7 +851,6 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	[view setAnimationInterval:1./20.];
 	[view startAnimation];
 }
-
 
 
 @end

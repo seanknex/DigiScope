@@ -39,7 +39,6 @@
 @property (strong, nonatomic) UILabel *dateRecorded;
 @property (strong, nonatomic) UILabel *saveSuccessLabel;
 
-
 - (IBAction)loadAction:(id)sender;
 - (IBAction)recordAction:(id)sender;
 - (IBAction)playAction:(id)sender;

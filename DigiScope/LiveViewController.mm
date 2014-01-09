@@ -51,7 +51,6 @@
 	
 }
 
-
 - (IBAction)loadAction:(id)sender {
 	[AudioController loadAllRecordings];
 	[LoadPopoverController presentPopoverFromRect:loadOutlet.frame inView:self.view permittedArrowDirections:UIPopoverArrowDirectionDown animated:YES];
@@ -84,7 +83,7 @@
 		[SavePopoverController presentPopoverFromRect:recordOutlet.frame inView:self.view permittedArrowDirections:UIPopoverArrowDirectionDown animated:YES];
 	}
 	else if(![AudioController isPlaying]){
-		[AudioController startRecording];
+		[AudioController startRecordingFromController:self];
 		[recordOutlet setTitle:@"Stop" forState:UIControlStateNormal];
 	}
 	else

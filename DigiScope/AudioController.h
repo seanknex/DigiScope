@@ -19,6 +19,15 @@
 
 @class DigiScopeAppAppDelegate;
 
+@protocol AudioControllerDelegate
+@required
+- (void)drawView:(id)sender forTime:(NSTimeInterval)time;
+@optional
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event;
+@end
+
 @interface AudioController : NSObject<AVAudioRecorderDelegate, MFMailComposeViewControllerDelegate, EAGLViewDelegate>{
 	AudioUnit ioUnit;
 	AVAudioRecorder *RecordingController;
@@ -28,7 +37,9 @@
 	AudioConverterRef audioConverter;
 	AudioBufferList*  drawABL;
 	BOOL resetOscilLine;
+	BOOL resetECGOscilLine;
 	GLfloat* oscilLine;
+	GLfloat* ECGoscilLine;
 	CAStreamBasicDescription	thruFormat;
     CAStreamBasicDescription    drawFormat;
 }
@@ -38,13 +49,14 @@
 @property BOOL hardwareAttached;
 @property BOOL loadFromData;
 @property (nonatomic, retain)	EAGLView* view;
+@property (nonatomic, retain) UIViewController *requestingController;
 
 +(AudioController*)sharedInstance;
 -(void)initializeAudioUnit;
 +(BOOL)startAudioUnit;
 +(void)stopAudioUnit;
 +(void)initializeRecorder;
-+(void)startRecording;
++(void)startRecordingFromController: (UIViewController*)controller;
 +(void)stopRecording;
 +(void)exportRecording;
 +(BOOL)isRecording;
@@ -66,5 +78,7 @@
 +(void)emailMP3FileWithData :(NSData*)fileData :(NSString*)fileName;
 +(void)setView: (UIView*)view;
 -(void)setView:(EAGLView *)EAGLViewFrame;
+
+
 
 @end
