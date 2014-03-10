@@ -23,6 +23,7 @@
 #define kDefaultDrawSamples 1024
 #define kMinDrawSamples 64
 #define kMaxDrawSamples 4096
+#define kSizeOfHeartRateBuffer 5
 
 SInt8 *drawBuffers[kNumDrawBuffers];
 SInt8 *ECGBuffer;
@@ -32,21 +33,132 @@ int drawBufferLen = kDefaultDrawSamples;
 int ECGBufferLen = 4096;
 int drawBufferLen_alloced = 0;
 int ECGBuferLen_alloced = 0;
-float gg = 0.;
-float gr = 0.;
-float gb = 0.;
-float lg = 0.;
-float lr = 0.;
-float lb = 1.;
-double averageECGValue;
-BOOL ECGInUse = TRUE;
+
+Float32 *inputSaveBuffer;
+int inputSaveOffset = 0;
+Float32 *postFilterBuffer;
+int postFilterOffset = 0;
+
+Float32 preferenceConstants[10] = {
+	0., // Red Line Color
+	1., // Green Line Color
+	1., // Blue Line Color
+	1., // Alpha Line Color
+	0., // Red Background Color
+	0., // Green Background Color
+	0., // Blue Background Color
+	1., // Alpha Background Color
+	1., // Scale
+	0}; // Translation
+
+Float32 *ioDataPtr;
+Float32 *inputBuffer;
+Float32 *BPBuffer; // Bandpass buffer
+Float64 *LPBuffer; // Lowpass buffer
+
+BOOL isRecording = FALSE;
+AudioFileID tempAudioFile;
+UInt64 byteOffset = 0;
+UInt64 fileByteSize = 0;
+BOOL isPlaying = FALSE;
+BOOL recordingAwaitingSave = FALSE;
+Float32 cutoffAmp = 0.5;
+Float32 max = 0;
+double startingFrameCount;
+UIDeviceOrientation currentOrientation = UIDeviceOrientationPortrait;
+
+// Heart Rate Variables
+BOOL heartRateBufferBeingModified = FALSE;
+Float32 *heartRateBuffer;
+int sizeOfHeartBuffer = 0;
+NSDate *dateLastUpdated;
+NSTimer *refreshTimer;
+
+
+
+# pragma mark Filter Definitions
+
+// Coefficents B and A for Butterworth Filter (4th order max, band pass, low pass)
+// FilterCoefficients[kAudioOptimizedFor_][Sampling_Rate(8000,44100)][Coefficents(gain,BP:B&A,LP:B&A)][Coefficient Values]
+Float64 FilterCoefficients[1][2][5][5] =
+{
+	// kAudioOptimizationOptions_Heart
+	{
+		// 8000 Hz Sampling Rate
+		{
+			{2000., 0., 0., 0., 0.}, // Filter Gain
+			{ 0.010432413371167, 0.0,  -0.020864826742333, 0.0, 0.010432413371167}, // Bandpass B
+			{1.00,  -3.684140456333678,   5.102011663126655,  -3.150585424636544, 0.7327260303718160}, // Bandpass A
+			{0.00000066171528800840, 0.00000264686115203361, 0.00000397029172805041, 0.00000264686115203361, 0.00000066171528800840}, // Lowpass B
+			{1.,  -3.848136880041180, 5.555835685441924, -3.566763664734585, 0.859075446778450} // Lowpass A
+		},
+		
+		// 44100 Hz Sampling Rate
+		{
+			{100000., 0., 0., 0., 0.}, // Filter Gain
+			{0.010432413371167, 0.0,  -0.020864826742333, 0.0, 0.010432413371167}, // Bandpass B
+			{1.00,  -3.684140456333678,   5.102011663126655,  -3.150585424636544, 0.7327260303718160}, // Bandpass A
+			{0.00000000076173778396083,   0.00000000304695113584330,   0.00000000457042670376495,   0.00000000304695113584330,   0.00000000076173778396083}, // Lowpass B
+			{1.,  -3.972449317496953,   5.917726838292429,  -3.918102679009986, 0.972825170402315} // Lowpass A
+		}
+	}
+};
+
+enum kAudioOptimizationOptions{
+	kAudioOptimizationOptions_Heart,
+	//kAudioOptimizationOptions_HeartMurmur,
+	//kAudioOptimizationOptions_Lungs,
+};
+
+enum kAudioOptimizationSampleRate{
+	kAudioOptimizationSampleRate_8000Hz,
+	kAudioOptimizationSampleRate_44100Hz,
+};
+
+enum kFilterCoefficients{
+	kAmp,
+	kB_Band,
+	kA_Band,
+	kB_Low,
+	kA_Low
+};
+
+BOOL filterNeedsUpdateFlag = TRUE;
+kAudioOptimizationSampleRate filterRate;
+kAudioOptimizationOptions filterOption = kAudioOptimizationOptions_Heart;
+
+Float32 freq = 125.;
+OSStatus err;
+
+double maxECGValue;
+BOOL inECGMode = FALSE;
 BOOL ECGRecordingRequest = FALSE;
 
 @implementation AudioController
-@synthesize myAppDelegate, fetchedRecordings, loadFromData, viewDelegate, hardwareAttached, view, requestingController;
+@synthesize myAppDelegate, fetchedRecordings, loadFromData, viewDelegate, digiscopeHardwareAttached, view, ControllerDelegate, notificationCenterAvailable;
+
+#pragma mark CheckError
+static void CheckError(OSStatus error, const char *operation){
+	if (error == noErr)
+		return;
+	
+	char errorString[20];
+	// See if it appears to be a 4-char-code
+	*(UInt32 *)(errorString + 1) = CFSwapInt32HostToBig(error);
+	if (isprint(errorString[1]) && isprint(errorString[2]) && isprint(errorString[3]) && isprint(errorString[4])) {
+		errorString[0] = errorString[5] = '\'';
+		errorString[6] = '\0';
+	}
+	else
+		sprintf(errorString, "%d",(int)error);
+	
+	fprintf(stderr, "Error: %s (%s)\n", operation, errorString);
+	exit(1);
+}
+
+
 
 #pragma mark Shared Instance
-
 
 +(AudioController *)sharedInstance{
 	static AudioController *myInstance = nil;
@@ -55,6 +167,8 @@ BOOL ECGRecordingRequest = FALSE;
 		myInstance = [[[self class] alloc] init];
 		[myInstance setUpAudioSession];
 		[myInstance initializeAudioUnit];
+		// Register for Notifications
+		[[NSNotificationCenter defaultCenter] addObserver:myInstance selector:@selector(orientationChanged:) name:UIDeviceOrientationDidChangeNotification object:nil];
 	}
 	return myInstance;
 }
@@ -72,8 +186,130 @@ void cycleOscilloscopeLines()
 // Render Call Back
 static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData)
 {
+	//NSLog(@"Start\n");
 	AudioController *THIS = (__bridge AudioController *)inRefCon;
-	OSStatus err = AudioUnitRender(THIS->ioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData);
+	
+	err = AudioUnitRender(THIS->ioUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData);
+	
+	ioDataPtr = (Float32*)ioData->mBuffers[0].mData;
+	
+	static BOOL tempBuffersCreated = FALSE;
+	if (!tempBuffersCreated) {
+		sizeOfHeartBuffer = inNumberFrames*kSizeOfHeartRateBuffer;
+		inputBuffer = (Float32*)malloc((inNumberFrames+4)*sizeof(Float32));
+		BPBuffer = (Float32*)malloc((inNumberFrames+4)*sizeof(Float32));
+		heartRateBuffer = (Float32*)malloc((sizeOfHeartBuffer)*sizeof(Float32));
+		memset(inputBuffer, 0, (inNumberFrames+4)*sizeof(Float32));
+		memset(BPBuffer, 0, (inNumberFrames+4)*sizeof(Float32));
+		memset(heartRateBuffer, 0, (sizeOfHeartBuffer)*sizeof(Float32));
+		inputSaveBuffer = (Float32*)malloc(40000*sizeof(Float32));
+		postFilterBuffer = (Float32*)malloc(40000*sizeof(Float32));
+		tempBuffersCreated = TRUE;
+	}
+	
+	if (inputSaveOffset+inNumberFrames < 40000 && isRecording) {
+		memcpy(&inputSaveBuffer[inputSaveOffset], ioDataPtr, inNumberFrames*sizeof(Float32));
+		inputSaveOffset+=inNumberFrames;
+	}
+	
+	// Zero the Audio if Digiscope Hardware is not found
+	if (!THIS.digiscopeHardwareAttached)
+		memset(ioDataPtr, 0, ioData->mBuffers[0].mDataByteSize);
+	
+	if (inECGMode) {
+		for (int i = 4; i<inNumberFrames+4; i++)
+			ioDataPtr[i] = 5.000*ioDataPtr[i]; // Pre Amplify
+	}
+	else{
+		memcpy(&inputBuffer[4], ioDataPtr, ioData->mBuffers[0].mDataByteSize);
+		memset(ioDataPtr, 0, ioData->mBuffers[0].mDataByteSize);
+		Float32 *ioDataPtr2 = (Float32*)ioData->mBuffers[1].mData;
+		memset(ioDataPtr2, 0, ioData->mBuffers[1].mDataByteSize);
+		
+		/////////////////////////////////// Audio /////////////////////////////////////////////////////
+		
+		//The best yet ....
+		for (int i = 4; i<inNumberFrames+4; i++)
+			inputBuffer[i] = 160.000*inputBuffer[i]; // Pre Amplify
+		
+		
+		for (int i = 4; i<inNumberFrames+4; i++) {
+			BPBuffer[i] = FilterCoefficients[filterOption][filterRate][kB_Band][0] * inputBuffer[i]
+			+FilterCoefficients[filterOption][filterRate][kB_Band][1] * inputBuffer[i-1]
+			+FilterCoefficients[filterOption][filterRate][kB_Band][2] * inputBuffer[i-2]
+			+FilterCoefficients[filterOption][filterRate][kB_Band][3] * inputBuffer[i-3]
+			+FilterCoefficients[filterOption][filterRate][kB_Band][4] * inputBuffer[i-4]
+			-FilterCoefficients[filterOption][filterRate][kA_Band][1] * BPBuffer[i-1]
+			-FilterCoefficients[filterOption][filterRate][kA_Band][2] * BPBuffer[i-2]
+			-FilterCoefficients[filterOption][filterRate][kA_Band][3] * BPBuffer[i-3]
+			-FilterCoefficients[filterOption][filterRate][kA_Band][4] * BPBuffer[i-4];
+		}
+		
+		if (postFilterOffset+inNumberFrames < 40000 && isRecording) {
+			memcpy(&postFilterBuffer[postFilterOffset], BPBuffer, inNumberFrames*sizeof(Float32));
+			postFilterOffset+=inNumberFrames;
+		}
+		
+		memcpy(ioDataPtr, BPBuffer, ioData->mBuffers[0].mDataByteSize);
+		memcpy(&(BPBuffer)[0], &(BPBuffer)[inNumberFrames], 4*sizeof(Float32));
+		memcpy(&(inputBuffer)[0], &(inputBuffer)[inNumberFrames], 4*sizeof(Float32));
+		
+		
+		// Amplify Output
+		/*
+		static int calcAmpConst = 1;
+		static Float32 ampInitial = 0;
+		static Float32 ampFinal = 0.5;
+		static Float32 amplification = 0;
+		for (int i = 0; i<inNumberFrames; i++){
+			if (fabsf(ioDataPtr[i])>max)
+				max = fabsf(ioDataPtr[i]);
+		}
+		
+		if (calcAmpConst <= 0) {
+			ampInitial = ampFinal;
+			//if (max < 0.4 || max > 3.0)
+				//ampFinal = 0;
+			//else
+				ampFinal = 0.5;
+			max = 0;
+			calcAmpConst = 4;
+		}
+		else
+			calcAmpConst--;
+		
+		amplification = ampFinal - (ampFinal - ampInitial)*exp2f(-2+0.5*calcAmpConst);
+		
+		for (int i = 0; i<inNumberFrames; i++)
+			ioDataPtr[i] = ioDataPtr2[i] = amplification * ioDataPtr[i];
+		*/
+		
+		// Set aside data for recording
+		if (isRecording) {
+			CheckError(AudioFileWriteBytes(tempAudioFile, FALSE, byteOffset, &ioData->mBuffers[0].mDataByteSize, ioDataPtr),"Failed to Write Bytes");
+			byteOffset += (SInt64)ioData->mBuffers[0].mDataByteSize;
+		}
+		else if (isPlaying){
+			UInt32 numOfBytesToRead = ioData->mBuffers[0].mDataByteSize;
+			if (byteOffset+numOfBytesToRead < fileByteSize){
+				CheckError(AudioFileReadBytes(tempAudioFile, FALSE, byteOffset, &numOfBytesToRead, ioDataPtr), "Failed to Read Bytes");
+				byteOffset += numOfBytesToRead;
+				memcpy(ioDataPtr2, ioDataPtr, numOfBytesToRead);
+			}
+			else
+				isPlaying = FALSE;
+		}
+		
+		
+		/////////////////////////////////// End Audio /////////////////////////////////////////////////////
+	}
+	
+	// Fill Heart Rate Buffer
+	while (heartRateBufferBeingModified){} // Pause until it is no longer modified
+	heartRateBufferBeingModified = TRUE;
+	memcpy(heartRateBuffer, &heartRateBuffer[inNumberFrames], inNumberFrames*(kSizeOfHeartRateBuffer-1)*sizeof(Float32));
+	memcpy(&heartRateBuffer[(kSizeOfHeartRateBuffer-1)*inNumberFrames], ioDataPtr, inNumberFrames*sizeof(Float32));
+	heartRateBufferBeingModified = FALSE;
 	
 	{
 		// The draw buffer is used to hold a copy of the most recent PCM data to be drawn
@@ -123,11 +359,11 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		}
 		
 		SInt8 *data_ptr = (SInt8 *)(THIS->drawABL->mBuffers[0].mData);
-		averageECGValue = 0;
+		maxECGValue = 0;
 		
 		for (i=1; i<inNumberFrames; i++)
 		{
-			if (!ECGInUse) {
+			if (!inECGMode) {
 				if ((i+drawBufferIdx) >= drawBufferLen)
 				{
 					cycleOscilloscopeLines();
@@ -137,78 +373,84 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 				drawBuffers[0][i + drawBufferIdx] = data_ptr[2]; // 2
 				ECGDrawBufferIdx = 0;
 			}
+			
 			else{
-				averageECGValue += data_ptr[2]*data_ptr[2];
+				if (fabs(maxECGValue)<fabs(data_ptr[2]))
+					maxECGValue = data_ptr[2];
+				
 				drawBufferIdx = 0;
 				
-				if ((i+1)%64 == 0) {
-					ECGBuffer[ECGDrawBufferIdx] = sqrtf(averageECGValue/64.);
+				if ((i+1)%8 == 0) {
+					ECGBuffer[ECGDrawBufferIdx] = maxECGValue;
 					ECGDrawBufferIdx++;
-					averageECGValue = 0;
+					maxECGValue = 0;
 				}
 				
 				// Readjust ECGDrawBufferIdx if needed
 				if (ECGDrawBufferIdx >= ECGBufferLen)
 					ECGDrawBufferIdx = 0;
 			}
+			 
 			data_ptr += 4;
 		}
 		
 		drawBufferIdx += inNumberFrames;
-		
-		
-		
-		
 
 	}
 	
+	//NSLog(@"Stop\n");
 	return err;
 	
+}
+
+#pragma mark Touch Funchtions
+- (void)handleGesture:(UIGestureRecognizer *)gestureRecognizer{
+	if ([gestureRecognizer isKindOfClass:[UIPinchGestureRecognizer class]]) {
+		UIPinchGestureRecognizer *pinchRecognizer = (UIPinchGestureRecognizer*)gestureRecognizer;
+		preferenceConstants[kAudioControllerPreferences_Scale] = pinchRecognizer.scale;
+		if (preferenceConstants[kAudioControllerPreferences_Scale]<1.)
+			preferenceConstants[kAudioControllerPreferences_Scale] = 1;
+	}
+	else if ([gestureRecognizer isKindOfClass:[UIPanGestureRecognizer class]]){
+		UIPanGestureRecognizer *panRecognizer = (UIPanGestureRecognizer*)gestureRecognizer;
+		preferenceConstants[kAudioControllerPreferences_Translation] = [panRecognizer translationInView:view].x;
+	}
+	else if ([gestureRecognizer isKindOfClass:[UISwipeGestureRecognizer class]]){
+		UISwipeGestureRecognizer *swipeRecognizer = (UISwipeGestureRecognizer*)gestureRecognizer;
+		if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_SwipeOccurance withObject:swipeRecognizer];}
+	}
+}
+
+-(BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer{
+	return YES;
 }
 
 #pragma mark AudioSession/RIOUnit Methods
 
 -(void)initializeAudioUnit{
-	
-	OSStatus status;
+
 	loadFromData = FALSE;
 	
 	// Describe audio component
-	AudioComponentDescription desc;
+	AudioComponentDescription desc = {0};
 	desc.componentType = kAudioUnitType_Output;
 	desc.componentSubType = kAudioUnitSubType_RemoteIO;
-	desc.componentFlags = 0;
-	desc.componentFlagsMask = 0;
 	desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 	
 	// Get component
 	AudioComponent inputComponent = AudioComponentFindNext(NULL, &desc);
 	
-	// Get audio units
-	status = AudioComponentInstanceNew(inputComponent, &ioUnit);
-	
-	if (status != noErr)
-		printf("Error in AudioComponentInstanceNew");
+	// Get audio unit
+	CheckError(AudioComponentInstanceNew(inputComponent, &ioUnit), "Error in AudioComponentInstanceNew");
 	
 	// Enable IO for recording
 	UInt32 flag = 1;
-	status = AudioUnitSetProperty(ioUnit,
+	CheckError(AudioUnitSetProperty(ioUnit,
 								  kAudioOutputUnitProperty_EnableIO,
 								  kAudioUnitScope_Input,
 								  kInputBus,
 								  &flag,
-								  sizeof(flag));
-	
-	// Enable IO for playback
-	status = AudioUnitSetProperty(ioUnit,
-								  kAudioOutputUnitProperty_EnableIO,
-								  kAudioUnitScope_Output,
-								  kOutputBus,
-								  &flag,
-								  sizeof(flag));
-	
-	if (status != noErr)
-		printf("Error in Enabling Input");
+								  sizeof(flag)),"Could Not Enable IO");
 	
 	
 	// Connecting the ioUnit input to the ioUnit output: Audio Streaming
@@ -217,56 +459,41 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	AUConnection.destInputNumber = 1;
 	AUConnection.sourceOutputNumber = 0;
 	
-	status = AudioUnitSetProperty(ioUnit,
+	CheckError(AudioUnitSetProperty(ioUnit,
 								  kAudioUnitProperty_MakeConnection,
 								  kAudioUnitScope_Input,
 								  1,
-								  &AUConnection, sizeof(AUConnection));
+								  &AUConnection, sizeof(AUConnection)),"Could Not Connect Input to Output");
 	
-	if (status != noErr)
-		printf("\nError in Connection");
+	// Syncronize Formats
+	AudioStreamBasicDescription inputFormat = {0};
+	UInt32 propertySize = sizeof(inputFormat);
+	CheckError(AudioUnitGetProperty(ioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1, &inputFormat, &propertySize), "Error AudioUnitGetProperty");
+	CheckError(AudioUnitSetProperty(ioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &inputFormat, propertySize), "Error AudioUnitSetProperty");
 	
-	// Any Additional Stream Formating
-	/*
-	 AudioStreamBasicDescription outFormat;
-	 outFormat.mSampleRate = 44100.0;
-	 outFormat.mFormatID = kAudioFormatLinearPCM;
-	 outFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger|kAudioFormatFlagIsPacked;
-	 outFormat.mFramesPerPacket	= 1;
-	 outFormat.mChannelsPerFrame	= 1;
-	 outFormat.mBitsPerChannel		= 16;
-	 outFormat.mBytesPerPacket		= 2;
-	 outFormat.mBytesPerFrame		= 2;
-	 
-	 status = AudioUnitSetProperty(ioUnit,
-	 kAudioUnitProperty_StreamFormat,
-	 kAudioUnitScope_Output,
-	 kInputBus,
-	 &outFormat,
-	 sizeof(outFormat));
-	 
-	 status = AudioUnitSetProperty(ioUnit,
-	 kAudioUnitProperty_StreamFormat,
-	 kAudioUnitScope_Input,
-	 kOutputBus,
-	 &outFormat,
-	 sizeof(outFormat));
-	 */
+	// Set Filter Sample Rate
+	switch ((int)inputFormat.mSampleRate) {
+		case 8000:
+			filterRate = kAudioOptimizationSampleRate_8000Hz;
+			break;
+		case 44100:
+			filterRate = kAudioOptimizationSampleRate_44100Hz;
+			break;
+		default:
+			filterRate = kAudioOptimizationSampleRate_8000Hz;
+			break;
+	}
+	
 	
 	// Configure and Set the Render Callback function (needed to render the audio)
 	AURenderCallbackStruct	inputProc;
 	inputProc.inputProc = renderInput;
 	inputProc.inputProcRefCon = (__bridge void *)(self);
-	
-	status = AudioUnitSetProperty(ioUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &inputProc, sizeof(inputProc));
-	
-	if (status != noErr)
-		printf("\nError setting Render Callback");
+	CheckError(AudioUnitSetProperty(ioUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &inputProc, sizeof(inputProc)),"Error in Setting Render Callback");
 	
 	// Initialize the Unit and confirm that all connections are correct
-	status = AudioUnitInitialize(ioUnit);
-	if (status != noErr)
-		printf("\nError in AUInitialize");
+	CheckError(AudioUnitInitialize(ioUnit),"Error AudioUnitInitialize");
+	
 	
 	UInt32 maxFPS;
 	UInt32 size = sizeof(maxFPS);
@@ -285,9 +512,9 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	oscilLine = (GLfloat*)malloc(drawBufferLen * 2 * sizeof(GLfloat));
 	ECGoscilLine = (GLfloat*)malloc(ECGBufferLen * 2 * sizeof(GLfloat));
 	
-	thruFormat = CAStreamBasicDescription(44100, kAudioFormatLinearPCM, 4, 1, 4, 2, 32, kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked | kAudioFormatFlagIsFloat | kAudioFormatFlagIsNonInterleaved);
+	thruFormat = CAStreamBasicDescription(8000, kAudioFormatLinearPCM, 4, 1, 4, 2, 32, kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked | kAudioFormatFlagIsFloat | kAudioFormatFlagIsNonInterleaved);
 	drawFormat.SetAUCanonical(2, false);
-	drawFormat.mSampleRate = 44100;
+	drawFormat.mSampleRate = 8000;
 	AudioConverterNew(&thruFormat, &drawFormat, &audioConverter);
 	
 }
@@ -296,35 +523,22 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 
 +(BOOL)startAudioUnit{
 	// Start the AUGraph
-	OSStatus status = noErr;
-	if (([AudioController sharedInstance].hardwareAttached & disableAUIfHardwareNotAvailable) || !disableAUIfHardwareNotAvailable)
-		status = AudioOutputUnitStart([AudioController sharedInstance]->ioUnit);
-	else{
-		NSLog(@"Error, Cannot Initialize Audio Unit because Proper Hardware was not Detected");
-		return  FALSE;
-	}
-		
-	if (status != noErr){
-		printf("\nError in Turning on the Output (AudioController)");
-		return FALSE;
-	}
+	CheckError(AudioOutputUnitStart([AudioController sharedInstance]->ioUnit),"Error AudioOutputUnitStart");
 	
+	// Start the Heart Rate Monitor
+	refreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:[AudioController class] selector:@selector(refreshHeartRate) userInfo:nil repeats:YES];
 	return TRUE;
 }
 
 +(void)stopAudioUnit{
-	
-	// Check if AUGrapph is Running
-	OSStatus status;
-	status = AudioOutputUnitStop([AudioController sharedInstance]->ioUnit);
-	if (status != noErr)
-		printf("\nError in Turning off on the Output (AudioController)");
-	
+	CheckError(AudioOutputUnitStop([AudioController sharedInstance]->ioUnit),"Error AudioOutputUnitStop");
+	[refreshTimer invalidate];
+	refreshTimer = nil;
 }
 
 -(void)setUpAudioSession{
 	
-	hardwareAttached = FALSE;
+	digiscopeHardwareAttached = FALSE;
 	
 	// Set up App Delegate
 	if (myAppDelegate == NULL)
@@ -342,7 +556,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		NSLog(@"\nError in Setting the Audio Session Category: %@", [error localizedDescription]);
 	
 	// Set Sample Rate
-	[AudioSession setPreferredSampleRate:44100.0 error:&error];
+	[AudioSession setPreferredSampleRate:8000 error:&error];
 	if (error != nil)
 		NSLog(@"\nError in Setting the Preferred Sample Rate: %@", [error localizedDescription]);
 	
@@ -358,29 +572,27 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	
 	// Set Input Settings
 	for (AVAudioSessionPortDescription *mDes in AudioSession.availableInputs) {
-		if ([mDes.portType isEqualToString:AVAudioSessionPortBluetoothHFP] || [mDes.portType isEqualToString:AVAudioSessionPortBluetoothA2DP]) {
+		if ([mDes.portName isEqualToString:@"Digiscope"]|| [mDes.portName isEqualToString:@"DigiScopeTestBoard"]|| [mDes.portName isEqualToString:@"DigiScope"]){
 			[AudioSession setPreferredInput:mDes error:&error];
-			if (error != nil)
-				NSLog(@"\nError Setting the Input to Bluetooth, although Input was discovered: %@", [error localizedDescription]);
-			else
-				hardwareAttached = TRUE;
+			digiscopeHardwareAttached = TRUE;
 		}
+		if (error != nil)
+			NSLog(@"\nError Setting Input: %@", [error localizedDescription]);
 	}
 	
-	if (!hardwareAttached && !bluetoothOnly) {
-		for (AVAudioSessionPortDescription *mDes in AudioSession.availableInputs) {
-			if ([mDes.portType isEqualToString:AVAudioSessionPortHeadsetMic]) {
-				[AudioSession setPreferredInput:mDes error:&error];
-				if (error != nil)
-					NSLog(@"\nError Setting the Input to Headset Mic, although Mic was discovered: %@", [error localizedDescription]);
-				else
-					hardwareAttached = TRUE;
-			}
-			
-		}
+	// Reset Category if the hardware was not found
+	if (!digiscopeHardwareAttached) {
+		[AudioSession setCategory:AVAudioSessionCategoryPlayback error:&error];
+		if (error != nil)
+			NSLog(@"\nError in Setting the Audio Session Category: %@", [error localizedDescription]);
+		
+		// Set Sample Rate
+		if (error != nil)
+			NSLog(@"\nError in Setting the Preferred Sample Rate: %@", [error localizedDescription]);
+		
 	}
 	
-	baseFileURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"AudioFile"]]];
+	
 
 	
 }
@@ -408,37 +620,73 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		NSLog(@"\nError, Recorder did not prepare");
 }
 
-+(void)startRecordingFromController:(UIViewController *)controller{
-	if (![[AudioController sharedInstance]->RecordingController isRecording]){
-		if (ECGInUse) {
-			ECGRecordingRequest = TRUE;
-			[AudioController sharedInstance]->requestingController = controller;
-		}
-		else{
-			[self initializeRecorder];
-			BOOL success = [[AudioController sharedInstance]->RecordingController record];
-			if (!success)
-				NSLog(@"\nError, Recorder did not start recording");
-		}
-		
-			
++(void)startRecording{
+	/*
+	if (inECGMode) {
+		ECGRecordingRequest = TRUE;
+		if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_ECGSaveInProgress];}
 	}
-	else
-		NSLog(@"\nError, recorder is already running");
+	else{
+	 */
+		if (!isRecording) {
+			AudioStreamBasicDescription recordFormat = {0};
+			recordFormat.mSampleRate = 8000;
+			recordFormat.mFormatID = kAudioFormatLinearPCM;
+			recordFormat.mBitsPerChannel = 32;
+			recordFormat.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+			recordFormat.mFramesPerPacket = 1;
+			recordFormat.mChannelsPerFrame = 1;
+			recordFormat.mBytesPerFrame = 4;
+			recordFormat.mBytesPerPacket = 4;
+			
+			NSURL *documentDirectory = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+			NSURL *myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/TempFile.wav"]];
+			CFURLRef myFileUrl = (__bridge CFURLRef)myNSURL;
+			CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileWAVEType, &recordFormat, kAudioFileFlags_EraseFile, &tempAudioFile),"Could not create a tempAudioFile for saving");
+			printf("\nRecording");
+			byteOffset = 0;
+			isRecording = TRUE;
+			if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_AudioSaveInProgress withObject:nil];}
+			
+		}
+		else printf("\nError: Recorder is already running");
+		
+	//}
 	
 }
 
 +(void)stopRecording{
-	if ([[AudioController sharedInstance]->RecordingController isRecording]){
-		[[AudioController sharedInstance]->RecordingController stop];
+	/*
+	if (inECGMode) {
+		if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_ECGSaveComplete];}
 	}
-	else
-		NSLog(@"\nError, recorder isn't running");
+	else{
+	 */
+		if (isRecording) {
+			isRecording = FALSE;
+			printf("\nStopped");
+			AudioFileClose(tempAudioFile);
+			recordingAwaitingSave = TRUE;
+			if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_AudioSaveComplete withObject:nil];}
+			
+			for (int i = 0; i<40000; i++)
+				printf("\n%.9f",inputSaveBuffer[i]);
+			postFilterOffset = 0;
+			
+			for (int i = 0; i<40000; i++)
+				printf("\n%.9f",postFilterBuffer[i]);
+			inputSaveOffset = 0;
+		}
+		else{
+			printf("\nError: Not Currently Recording");
+		}
+	//}
+	
 	
 }
 
 +(BOOL)isRecording{
-	return [[AudioController sharedInstance]->RecordingController isRecording];
+	return isRecording;
 }
 
 +(void)exportRecording{
@@ -446,43 +694,94 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 }
 
 #pragma mark Player Methods
-+(void)initializePlayer{
-	NSError *error;
-	
-	[AudioController sharedInstance]->PlayingController = [[AVAudioPlayer alloc] initWithContentsOfURL:[AudioController sharedInstance]->baseFileURL error:&error];
-	
-	if (error != nil)
-		NSLog(@"\nError in initializing Player with temporary URL: %@", [error localizedDescription]);
-	
-	if ([AudioController sharedInstance]->PlayingController.duration == 0)
-		NSLog(@"\nWarning: Player was initialized with an empty audio file");
-	
-	[[AudioController sharedInstance]->PlayingController prepareToPlay];
-	
-}
 
-+(float)startPlaying{
-	if (![[AudioController sharedInstance]->PlayingController isPlaying]){
-		[self stopAudioUnit];
-		[self initializePlayer];
-		[[AudioController sharedInstance]->PlayingController play];
++(void)startPlaying{
+	float duration = 0;
+	if (!isPlaying){
+		
+		// Open TempFile
+		NSURL *documentDirectory = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+		NSURL *myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/TempFile.caf"]];
+		CFURLRef myFileUrl = (__bridge CFURLRef)myNSURL;
+		CheckError(AudioFileOpenURL(myFileUrl, kAudioFileReadPermission, 0, &tempAudioFile), "Could Not Open TempFile.wav");
+		AudioStreamBasicDescription fileFormat = {0};
+		UInt32 propSize = sizeof(fileFormat);
+		CheckError(AudioFileGetProperty(tempAudioFile, kAudioFilePropertyDataFormat, &propSize, &fileFormat), "Could not get file format");
+		
+		// Check which hardware is available
+		if ([[AVAudioSession sharedInstance] sampleRate] != fileFormat.mSampleRate) {
+			
+			// Convert TempFile into the right sample rate
+			UInt64 numOfBytes;
+			propSize = sizeof(numOfBytes);
+			CheckError(AudioFileGetProperty(tempAudioFile, kAudioFilePropertyAudioDataByteCount, &propSize, &numOfBytes), "Couldn't get the total number of bytes");
+			
+			UInt32 numOfBytes32 = (UInt32)numOfBytes;
+			UInt32 numOfFrames = (UInt32)numOfBytes/sizeof(Float32);
+			Float32 *audioBuffer = (Float32*)malloc(numOfBytes32);
+			CheckError(AudioFileReadBytes(tempAudioFile, FALSE, 0, &numOfBytes32, audioBuffer), "Could not read bytes from temp file");
+			
+			numOfFrames = (UInt32)floor(numOfFrames*[[AVAudioSession sharedInstance] sampleRate]/fileFormat.mSampleRate);
+			Float32 *adjAudioBuffer = (Float32*)malloc(numOfFrames*sizeof(Float32));
+			int x1 = 0;
+			int x2 = 0;
+			float x = 0;
+			float delta = fileFormat.mSampleRate/[[AVAudioSession sharedInstance] sampleRate]
+			;
+			for (int i = 0; i<numOfFrames; i++) {
+				x2 += (x>x2);
+				x1 = x2-1;
+				adjAudioBuffer[i] = (audioBuffer[x2]-audioBuffer[x1])/(x2-x1)*(x-x1)+audioBuffer[x1];
+				x+=delta;
+			}
+			
+			// Close current Temp File
+			CheckError(AudioFileClose(tempAudioFile), "Could not close open temp file");
+			
+			// Rewrite Temp File
+			fileFormat.mSampleRate = [[AVAudioSession sharedInstance] sampleRate];
+			CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileCAFType, &fileFormat, kAudioFileFlags_EraseFile, &tempAudioFile), "Could not create new temp file");
+			
+			// Write Bytes to Temp File
+			numOfBytes32 = numOfFrames*sizeof(Float32);
+			CheckError(AudioFileWriteBytes(tempAudioFile, FALSE, 0, &numOfBytes32, adjAudioBuffer), "Could not write bytes to Temp File");
+			
+		}
+		
+		
+		propSize = sizeof(fileByteSize);
+		CheckError(AudioFileGetProperty(tempAudioFile, kAudioFilePropertyAudioDataByteCount, &propSize, &fileByteSize), "Could not get AudioDataByteCount");
+		duration = fileByteSize/fileFormat.mSampleRate/sizeof(Float32);
+		byteOffset = 0;
+		isPlaying = TRUE;
+		if([AudioController sharedInstance]->notificationCenterAvailable){
+			[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_AudioPlayingStarted withObject:nil];
+			NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[[AudioController sharedInstance]->ControllerDelegate methodSignatureForSelector:@selector(AudioControllerNotificationCenter: withObject:)]];
+			kAudioControllerNotification notification = kAudioControllerNotification_AudioPlayingStopped;
+			[inv setSelector:@selector(AudioControllerNotificationCenter: withObject:)];
+			[inv setTarget:[AudioController sharedInstance]->ControllerDelegate];
+			[inv setArgument:&notification atIndex:2];
+			[inv performSelector:@selector(invoke) withObject:nil afterDelay:duration];
+			
+		}
 	}
 	else
-		NSLog(@"Error, play is currently playing");
-	return [AudioController sharedInstance]->PlayingController.duration;
+		NSLog(@"Error, Play is currently playing");
 }
 
 +(void)stopPlaying{
-	if ([[AudioController sharedInstance]->PlayingController isPlaying]){
-		[[AudioController sharedInstance]->PlayingController stop];
+	if (isPlaying){
+		isPlaying = FALSE;
+		CheckError(AudioFileClose(tempAudioFile), "Could not close TempFile.wav");
 		[self startAudioUnit];
+		if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_AudioPlayingStarted withObject:nil];}
 	}
 	else
-		NSLog(@"Error, player is not currently playing");
+		NSLog(@"Error, Player is not currently playing");
 }
 
 +(BOOL)isPlaying{
-	return [[AudioController sharedInstance]->PlayingController isPlaying];
+	return isPlaying;
 }
 
 +(BOOL)saveRecording:(NSString *)patientFirstName :(NSString *)patientLastName{
@@ -490,7 +789,61 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	recording.recordingPatientFirstName = patientFirstName;
 	recording.recordingPatientLastName = patientLastName;
 	recording.recordingDate = [NSDate date];
-	recording.recordingData = [NSData dataWithContentsOfURL:[AudioController sharedInstance]->baseFileURL];
+	recording.recordingIsECG = [NSNumber numberWithBool:inECGMode];
+	
+	// Determine Date String
+	NSDateFormatter *dateFormat = [[NSDateFormatter alloc] init];
+	[dateFormat setDateStyle:NSDateFormatterMediumStyle];
+	[dateFormat setTimeStyle:NSDateFormatterNoStyle];
+	NSArray *dateComponents = [[dateFormat stringFromDate:recording.recordingDate] componentsSeparatedByString:@" "];
+	NSMutableString *dateString = [[NSMutableString alloc] initWithString:[dateComponents objectAtIndex:0]];
+	[dateString appendString:@"_"];
+	[dateString appendString:[dateComponents lastObject]];
+	
+    
+    // Determine the file name and data
+	NSMutableString *fileName = [[NSMutableString alloc] init];
+	if (![patientLastName isEqualToString:@""]) {
+		[fileName appendString:patientLastName];
+		[fileName appendString:@"_"];
+	}
+	if (![patientFirstName isEqualToString:@""]) {
+		[fileName appendString:patientFirstName];
+		[fileName appendString:@"_"];
+	}
+	[fileName appendString:dateString];
+	
+	// Open Temp File
+	NSURL *documentDirectory = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+	NSURL *myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/TempFile.caf"]];
+	CFURLRef myFileUrl = (__bridge CFURLRef)myNSURL;
+	CheckError(AudioFileOpenURL(myFileUrl, kAudioFileReadPermission, 0, &tempAudioFile), "Could Not Open UserFile.caf");
+	
+	// Get File Format
+	AudioStreamBasicDescription fileFormat = {0};
+	UInt32 propSize = sizeof(fileFormat);
+	CheckError(AudioFileGetProperty(tempAudioFile, kAudioFilePropertyDataFormat, &propSize, &fileFormat), "Could not get file Format");
+	
+	// Create User Audio File By Copying Over Data from Temp File
+	myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:[NSString stringWithFormat:@"/%s.caf",[fileName UTF8String]]]];
+	myFileUrl = (__bridge CFURLRef)myNSURL;
+	AudioFileID UserFile;
+	CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileCAFType, &fileFormat, kAudioFileFlags_EraseFile, &UserFile), "Could not open up a User Specific File");
+	
+	// Copy URL string
+	recording.recordingPath = [myNSURL path];
+			 
+	// Get Total Bytes and Copy
+	UInt64 numOfBytes;
+	propSize = sizeof(numOfBytes);
+	CheckError(AudioFileGetProperty(tempAudioFile, kAudioFilePropertyAudioDataByteCount, &propSize, &numOfBytes), "Could not get the total number of bytes from Temp File");
+	void *audioBuffer = malloc((UInt32)numOfBytes);
+	UInt32 numOfBytes32 = (UInt32)numOfBytes;
+	CheckError(AudioFileReadBytes(tempAudioFile, FALSE, 0, &numOfBytes32, audioBuffer),"Could not read the bytes from Temp File");
+	CheckError(AudioFileWriteBytes(UserFile, FALSE, 0, &numOfBytes32, audioBuffer), "Could not write the bytes to the User File");
+	free(audioBuffer);
+	CheckError(AudioFileClose(tempAudioFile), "Couldn't close the Temp File");
+	CheckError(AudioFileClose(UserFile), "Couldn't close the User File");
 	
 	NSError *error = nil;
 	if ([[AudioController sharedInstance]->myAppDelegate.managedObjectContext hasChanges]) {
@@ -504,6 +857,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		}
 	}
 	
+	recordingAwaitingSave = FALSE;
 	return FALSE;
 }
 
@@ -537,9 +891,37 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	// Getting Fetched Result
 	Recording *fetchedResult = [[AudioController sharedInstance]->fetchedRecordings objectAtIndex:index];
 	
-	[fetchedResult.recordingData writeToURL:[AudioController sharedInstance]->baseFileURL atomically:YES];
+	// Create User Audio File By Copying Over Data from TempAudioFile
+	NSURL *documentDirectory = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+	NSURL *myNSURL = [NSURL fileURLWithPath:fetchedResult.recordingPath];
+	CFURLRef myFileUrl = (__bridge CFURLRef)myNSURL;
+	AudioFileID UserFile;
+	CheckError(AudioFileOpenURL(myFileUrl, kAudioFileReadPermission, 0, &UserFile), "Could not load User File");
 	
-	if (fetchedResult.recordingData == nil)
+	// Get File Format
+	AudioStreamBasicDescription fileFormat = {0};
+	UInt32 propSize = sizeof(fileFormat);
+	CheckError(AudioFileGetProperty(UserFile, kAudioFilePropertyDataFormat, &propSize, &fileFormat), "Could not get file Format");
+	
+	// Open Temp File
+	myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/TempFile.caf"]];
+	myFileUrl = (__bridge CFURLRef)myNSURL;
+	CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileCAFType, &fileFormat, kAudioFileFlags_EraseFile, &tempAudioFile), "Could not open Temp File for loading"
+			   );
+	
+	// Get Total Bytes and Copy
+	UInt64 numOfBytes;
+	UInt32 numOfBytes32;
+	propSize = sizeof(numOfBytes);
+	CheckError(AudioFileGetProperty(UserFile, kAudioFilePropertyAudioDataByteCount, &propSize, &numOfBytes), "Could not get the total number of bytes from Temp File");
+	numOfBytes32 = (UInt32)numOfBytes;
+	void *audioBuffer = malloc(numOfBytes32);
+	CheckError(AudioFileReadBytes(UserFile, FALSE, 0, &numOfBytes32, audioBuffer),"Could not read the bytes from Temp File");
+	CheckError(AudioFileWriteBytes(tempAudioFile, FALSE, 0, &numOfBytes32, audioBuffer), "Could not write the bytes to the User File");
+	free(audioBuffer);
+	CheckError(AudioFileClose(UserFile), "Couldn't close the User File");
+	
+	if (numOfBytes == 0)
 		success = FALSE;
 	
 	[AudioController sharedInstance]->loadFromData = success;
@@ -565,10 +947,8 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	
 	Recording *fetchedResult = [[AudioController sharedInstance]->fetchedRecordings objectAtIndex:index];
 	NSDateFormatter *dateFormat = [[NSDateFormatter alloc] init];
-	[dateFormat setDateStyle:NSDateFormatterMediumStyle];
-	[dateFormat setTimeStyle:NSDateFormatterNoStyle];
-	NSMutableString *result = [[NSMutableString alloc] initWithString:@"Recorded on: "];
-	[result appendString:[dateFormat stringFromDate:fetchedResult.recordingDate]];
+	[dateFormat setDateFormat:@"MMM dd"];
+	NSString *result = [[NSString alloc] initWithString:[dateFormat stringFromDate:fetchedResult.recordingDate]];
 	return result;
 }
 
@@ -577,9 +957,13 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 }
 
 +(void)deleteRecordingAtFetchIndex:(NSInteger)index{
-	[[[AudioController sharedInstance]->myAppDelegate managedObjectContext] deleteObject:[[AudioController sharedInstance]->fetchedRecordings objectAtIndex:index]];
+	NSError *error;
+	Recording *deletedRecording = [[AudioController sharedInstance]->fetchedRecordings objectAtIndex:index];
+	[[NSFileManager defaultManager] removeItemAtPath:deletedRecording.recordingPath error:&error];
+	if (error != nil) printf("Could not removeItemAtPath from NSFileMananger");
+	[[[AudioController sharedInstance]->myAppDelegate managedObjectContext] deleteObject:deletedRecording];
+	deletedRecording = nil;
 	[[AudioController sharedInstance]->fetchedRecordings removeObjectAtIndex:index];
-	NSError *error = nil;
 	if ([[AudioController sharedInstance]->myAppDelegate.managedObjectContext hasChanges]) {
 		if (![[AudioController sharedInstance]->myAppDelegate.managedObjectContext save:&error])
 			NSLog(@"\nSave Failed: %@", [error localizedDescription]);
@@ -588,61 +972,70 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	}
 }
 
-+(void)emailMP3FileAtIndex:(NSInteger)index{
++(void)emailFileAtIndex:(NSInteger)index{
 	
 	// Determine Resource
 	Recording *fetchedResult = [[AudioController sharedInstance]->fetchedRecordings objectAtIndex:index];
 	
-	// Determine Date String
-	NSDateFormatter *dateFormat = [[NSDateFormatter alloc] init];
-	[dateFormat setDateStyle:NSDateFormatterMediumStyle];
-	[dateFormat setTimeStyle:NSDateFormatterNoStyle];
-	NSArray *dateComponents = [[dateFormat stringFromDate:fetchedResult.recordingDate] componentsSeparatedByString:@" "];
-	NSMutableString *dateString = [[NSMutableString alloc] initWithString:[dateComponents objectAtIndex:0]];
-	[dateString appendString:@"_"];
-	[dateString appendString:[dateComponents lastObject]];
+	// Create User Audio File By Copying Over Data from TempAudioFile
+	NSURL *documentDirectory = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+	NSURL *myNSURL = [NSURL fileURLWithPath:fetchedResult.recordingPath];
+	CFURLRef myFileUrl = (__bridge CFURLRef)myNSURL;
+	AudioFileID UserFile;
+	CheckError(AudioFileOpenURL(myFileUrl, kAudioFileReadPermission, 0, &UserFile), "Could not load User File");
 	
-    
-    // Determine the file name and data
-    NSMutableString *fileName = [[NSMutableString alloc] initWithString:fetchedResult.recordingPatientLastName];
-	[fileName appendString:@"_"];
-	[fileName appendString:fetchedResult.recordingPatientFirstName];
-	[fileName appendString:@"_"];
-	[fileName appendString:dateString];
-    
+	// Get Recording Format
+	AudioStreamBasicDescription userASBD = {0};
+	UInt32 propSize = sizeof(userASBD);
+	CheckError(AudioFileGetProperty(UserFile, kAudioFilePropertyDataFormat, &propSize, &userASBD), "Could not get UserFile Format");
+	
+	// Get Total Bytes and Copy
+	UInt64 numOfBytes;
+	UInt32 numOfBytes32;
+	propSize = sizeof(numOfBytes);
+	CheckError(AudioFileGetProperty(UserFile, kAudioFilePropertyAudioDataByteCount, &propSize, &numOfBytes), "Could not get the total number of bytes from Temp File");
+	numOfBytes32 = (UInt32)numOfBytes;
+	Float32 *audioBuffer = (Float32*)malloc(numOfBytes32);
+	CheckError(AudioFileReadBytes(UserFile, FALSE, 0, &numOfBytes32, audioBuffer),"Could not read the bytes from Temp File");
+	
+	// Set up Email File Format
+	AudioStreamBasicDescription emailFormat = {0};
+	emailFormat.mSampleRate = 8000;
+	emailFormat.mFormatID = kAudioFormatLinearPCM;
+	emailFormat.mBitsPerChannel = 32;
+	emailFormat.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+	emailFormat.mFramesPerPacket = 1;
+	emailFormat.mChannelsPerFrame = 1;
+	emailFormat.mBytesPerFrame = 4;
+	emailFormat.mBytesPerPacket = 4;
+	
+	// Enhance the amplitude prior to writing
+	for (int i=0; i<(int)numOfBytes32/sizeof(Float32); i++)
+		audioBuffer[i] = 4.0*audioBuffer[i];
+	
+	// Open Email File
+	AudioFileID emailAudioFile;
+	myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/Email.wav"]];
+	myFileUrl = (__bridge CFURLRef)myNSURL;
+	CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileWAVEType, &emailFormat, kAudioFileFlags_EraseFile, &emailAudioFile), "Could not open Email File ID"
+			   );
+	CheckError(AudioFileWriteBytes(emailAudioFile, FALSE, 0, &numOfBytes32, audioBuffer), "Could not write the bytes to the User File");
+	free(audioBuffer);
+	CheckError(AudioFileClose(UserFile), "Couldn't close the User File");
+	CheckError(AudioFileClose(emailAudioFile), "Could not close the email File");
+	
 	// Email
-	[self emailMP3FileWithData:fetchedResult.recordingData :fileName];
+	NSString *fileName = [[NSString alloc] initWithString:[[fetchedResult.recordingPath lastPathComponent] stringByDeletingPathExtension]];
+	[self emailFileWithData:[NSData dataWithContentsOfFile:[myNSURL path]] :[NSString stringWithFormat:@"%s.wav",[fileName UTF8String]]];
     
 }
 
-+(void)emailMP3FileFromURL :(NSString *)patientFirstName :(NSString *)patientLastName{
-	
-	// Determine Date String
-	NSDateFormatter *dateFormat = [[NSDateFormatter alloc] init];
-	[dateFormat setDateStyle:NSDateFormatterMediumStyle];
-	[dateFormat setTimeStyle:NSDateFormatterNoStyle];
-	NSArray *dateComponents = [[dateFormat stringFromDate:[NSDate date]] componentsSeparatedByString:@" "];
-	NSMutableString *dateString = [[NSMutableString alloc] initWithString:[dateComponents objectAtIndex:0]];
-	[dateString appendString:@"_"];
-	[dateString appendString:[dateComponents lastObject]];
-	
-	NSMutableString *fileName = [[NSMutableString alloc] initWithString:patientLastName];
-	[fileName appendString:@"_"];
-	[fileName appendString:patientFirstName];
-	[fileName appendString:@"_"];
-	[fileName appendString:dateString];
-	
-	// Email
-	[self emailMP3FileWithData:[NSData dataWithContentsOfURL:[AudioController sharedInstance]->baseFileURL] :fileName];
-	
-}
-
-+(void)emailMP3FileWithData:(NSData *)fileData :(NSString *)fileName{
++(void)emailFileWithData:(NSData *)fileData :(NSString *)fileName{
 	MFMailComposeViewController *mc = [[MFMailComposeViewController alloc] init];
     mc.mailComposeDelegate = self;
 	
 	// MIME type
-    NSString *mimeType = @"audio/mpeg3";
+    NSString *mimeType = @"audio/x-wav";
     
     // Add attachment
     [mc addAttachmentData:fileData mimeType:mimeType fileName:fileName];
@@ -651,8 +1044,6 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
     [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:mc animated:YES completion:NULL];
 	
 }
-
-
 
 +(void) mailComposeController:(MFMailComposeViewController *)controller didFinishWithResult:(MFMailComposeResult)result error:(NSError *)error
 {
@@ -684,7 +1075,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 	
-	glColor4f(gr, gg, gb, 1.);
+	glColor4f(preferenceConstants[kAudioControllerPreferences_BGColor_Red], preferenceConstants[kAudioControllerPreferences_BGColor_Green], preferenceConstants[kAudioControllerPreferences_BGColor_Blue], preferenceConstants[kAudioControllerPreferences_BGColor_Alpha]);
 	
 	glPushMatrix();
 	
@@ -692,32 +1083,6 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	glEnable(GL_BLEND);
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-	
-	/*
-	 {
-	 // Draw our background oscilloscope screen
-	 const GLfloat vertices[] = {
-	 0., 0.,
-	 512., 0.,
-	 0.,  512.,
-	 512.,  512.,
-	 };
-	 const GLshort texCoords[] = {
-	 0, 0,
-	 1, 0,
-	 0, 1,
-	 1, 1,
-	 };
-	 
-	 
-	 glBindTexture(GL_TEXTURE_2D, bgTexture);
-	 
-	 glVertexPointer(2, GL_FLOAT, 0, vertices);
-	 glTexCoordPointer(2, GL_SHORT, 0, texCoords);
-	 
-	 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-	 }
-	 */
 	
 	GLfloat *oscilLine_ptr;
 	GLfloat max = drawBufferLen;
@@ -746,27 +1111,35 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	float theta;
 	
 	// Customize for Rotation
-	
+	if (UIDeviceOrientationIsPortrait(currentOrientation)) {
 		theta = 0;
 		y = view.frame.size.width/2.0;
 		x = 0.;
 		height = view.frame.size.height/.9;
 		width = view.frame.size.width;
-	
-	glTranslatef(x, y, 0.);
+	}
+	else{
+		theta = 0;
+		y = view.frame.size.height/2.0;
+		x = 0;
+		height = view.frame.size.width/.9;
+		width = view.frame.size.height;
+	}
+		
+	glTranslatef(x+preferenceConstants[kAudioControllerPreferences_Translation], y, 0.);
 	glRotatef(theta, 0., 0., 1.0);
-	glScalef(height, width, 1.);
+	glScalef(height*preferenceConstants[kAudioControllerPreferences_Scale], width*preferenceConstants[kAudioControllerPreferences_Scale], 1.);
 	
 	// Set up some GL state for our oscilloscope lines
 	glDisable(GL_TEXTURE_2D);
 	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	glDisableClientState(GL_COLOR_ARRAY);
 	glDisable(GL_LINE_SMOOTH);
-	glLineWidth(2.);
+	glLineWidth(1.5);
 	
 	int drawBuffer_i;
 	// Draw a line for each stored line in our buffer (the lines are stored and fade over time)
-	if (ECGInUse) {
+	if (inECGMode) {
 		
 		GLfloat i;
 		oscilLine_ptr = ECGoscilLine;
@@ -776,7 +1149,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 			*oscilLine_ptr++ = i/ECGBufferLen;
 			*oscilLine_ptr++ = (Float32)(*drawBuffer_ptr++)/128.;
 		}
-		glColor4f(lr, lg, lb, 1.);
+		glColor4f(preferenceConstants[kAudioControllerPreferences_LineColor_Red], preferenceConstants[kAudioControllerPreferences_LineColor_Green], preferenceConstants[kAudioControllerPreferences_LineColor_Blue], preferenceConstants[kAudioControllerPreferences_LineColor_Alpha]);
 		
 		// Set up vertex pointer,
 		glVertexPointer(2, GL_FLOAT, 0, ECGoscilLine);
@@ -785,7 +1158,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		glDrawArrays(GL_LINE_STRIP, 0, ECGDrawBufferIdx-1);
 		
 		// Readjust Alpha
-		glColor4f(lr, lg, lb, (.5-.3*ECGDrawBufferIdx/ECGBufferLen));
+		glColor4f(preferenceConstants[kAudioControllerPreferences_LineColor_Red], preferenceConstants[kAudioControllerPreferences_LineColor_Green], preferenceConstants[kAudioControllerPreferences_LineColor_Blue], preferenceConstants[kAudioControllerPreferences_LineColor_Alpha]*(.5-.3*ECGDrawBufferIdx/ECGBufferLen));
 		
 		glDrawArrays(GL_LINE_STRIP, ECGDrawBufferIdx, ECGBufferLen-ECGDrawBufferIdx-1);
 		
@@ -816,9 +1189,9 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 			
 			// If we're drawing the newest line, draw it in solid green. Otherwise, draw it in a faded green.
 			if (drawBuffer_i == 0)
-				glColor4f(lr, lg, lb, 1.);
+				glColor4f(preferenceConstants[kAudioControllerPreferences_LineColor_Red], preferenceConstants[kAudioControllerPreferences_LineColor_Green], preferenceConstants[kAudioControllerPreferences_LineColor_Blue], preferenceConstants[kAudioControllerPreferences_LineColor_Alpha]);
 			else
-				glColor4f(lr, lg, lb, (.24 * (1. - ((GLfloat)drawBuffer_i / (GLfloat)kNumDrawBuffers))));
+				glColor4f(preferenceConstants[kAudioControllerPreferences_LineColor_Red], preferenceConstants[kAudioControllerPreferences_LineColor_Green], preferenceConstants[kAudioControllerPreferences_LineColor_Blue], preferenceConstants[kAudioControllerPreferences_LineColor_Alpha]*(.24 * (1. - ((GLfloat)drawBuffer_i / (GLfloat)kNumDrawBuffers))));
 			
 			// Set up vertex pointer,
 			glVertexPointer(2, GL_FLOAT, 0, oscilLine);
@@ -848,10 +1221,106 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 -(void)setView:(EAGLView *)EAGLViewFrame{
 	view = EAGLViewFrame;
 	view.delegate = self;
+	viewFrame = EAGLViewFrame.frame;
+	
+	// Customize Touch Handlers
+	[EAGLViewFrame.superview setMultipleTouchEnabled:YES];
+	UIPinchGestureRecognizer *pinchRecognizer = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handleGesture:)];
+	[pinchRecognizer setDelegate:self];
+	[view addGestureRecognizer:pinchRecognizer];
+	UIPanGestureRecognizer *panRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleGesture:)];
+	[panRecognizer setDelegate:self];
+	[view addGestureRecognizer:panRecognizer];
+	UISwipeGestureRecognizer *swipeRecognizer = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleGesture:)];
+	[swipeRecognizer setDirection:UISwipeGestureRecognizerDirectionDown];
+	[swipeRecognizer setDelegate:self];
+	[view addGestureRecognizer:swipeRecognizer];
+	swipeRecognizer = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleGesture:)];
+	[swipeRecognizer setDirection:UISwipeGestureRecognizerDirectionUp];
+	[swipeRecognizer setDelegate:self];
+	[view addGestureRecognizer:swipeRecognizer];
+	
+	
 	[view setAnimationInterval:1./20.];
 	[view startAnimation];
+	
 }
 
++(void)setDelegate:(id<AudioControllerDelegate>)delegate{
+	[[AudioController sharedInstance] setControllerDelegate:delegate];
+	[AudioController sharedInstance].notificationCenterAvailable = [delegate respondsToSelector:@selector(AudioControllerNotificationCenter: withObject:)];
+}
+
++(void)switchMode{
+	inECGMode = !inECGMode;
+	if (!inECGMode) {
+		// Erase current ECG data
+		for (int i = 0; i<ECGBufferLen; i++) {
+			ECGBuffer[i]=0;
+		}
+	}
+	if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_ModeChange withObject:nil];}
+	
+}
+
+#pragma mark Notifications
+-(void)orientationChanged:(NSNotification *)notification{
+	UIDeviceOrientation deviceOrientation = [UIDevice currentDevice].orientation;
+	if (UIDeviceOrientationIsLandscape(deviceOrientation)) {
+		[[UIApplication sharedApplication] setStatusBarHidden:YES];
+		CGRect frame = CGRectMake(0, 0, [[UIScreen mainScreen] bounds].size.height, [[UIScreen mainScreen] bounds].size.width);
+		currentOrientation = UIDeviceOrientationLandscapeLeft;
+		[view setFrame:frame];
+		
+	}
+	else if (UIDeviceOrientationIsPortrait(deviceOrientation)){
+		[[UIApplication sharedApplication] setStatusBarHidden:NO];
+		currentOrientation = UIDeviceOrientationPortrait;
+		[view setFrame:viewFrame];
+	}
+}
+
++(BOOL)isInECGMode{
+	return inECGMode;
+}
+
++(BOOL)isReadyToSave{
+	return recordingAwaitingSave;
+}
+
++(void)refreshHeartRate{
+	
+	while (sizeOfHeartBuffer == 0){} // Pause incase the buffer hasn't been created
+	Float32 avg = 0;
+	Float32 dev = 0;
+	static Float32 *tempHeartRateBuffer = (Float32*)malloc(sizeOfHeartBuffer*sizeof(Float32));
+	
+	// Copy rate to temp buffer
+	while (heartRateBufferBeingModified){} // Pause incase the buffer is being modified
+	heartRateBufferBeingModified = TRUE;
+	memcpy(tempHeartRateBuffer, heartRateBuffer, sizeOfHeartBuffer*sizeof(Float32));
+	heartRateBufferBeingModified = FALSE;
+	
+	// Calculate Average
+	for (int i = 0; i<sizeOfHeartBuffer; i++)
+		avg += tempHeartRateBuffer[i];
+	avg = avg/sizeOfHeartBuffer;
+	
+	// Calculate Deviation
+	for (int i = 0; i<sizeOfHeartBuffer; i++)
+		dev += tempHeartRateBuffer[i]-avg;
+	dev = sqrt(dev/sizeOfHeartBuffer);
+	
+	// Calculate the Heart Rate
+	int minHeartRateIndex = (int)60/200*[[AVAudioSession sharedInstance] sampleRate];
+	int x1 = 0;
+	int x2 = 0;
+	int heartRate = 74;
+	if ([dateLastUpdated timeIntervalSinceNow]>2.0) heartRate = 0;
+	if ([AudioController sharedInstance]->notificationCenterAvailable)
+		[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_RateUpdate withObject:[NSNumber numberWithInt:heartRate]];
+
+}
 
 @end
 

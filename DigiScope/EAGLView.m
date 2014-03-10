@@ -108,6 +108,11 @@
 	return self;
 }
 
+-(void)setFrame:(CGRect)frame{
+	[super setFrame:frame];
+	glViewport(0, 0, frame.size.width, frame.size.height);
+}
+
 
 - (void)layoutSubviews
 {

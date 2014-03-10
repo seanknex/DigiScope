@@ -12,45 +12,28 @@
 #import <AVFoundation/AVFoundation.h>
 #import "UIPopoverOverride.h"
 #import "EAGLView.h"
+#import "AudioController.h"
+
+enum kTrayConfiguration{
+	kTrayConfiguration_collapsed,
+	kTrayConfiguration_main,
+	kTrayConfiguration_open,
+	kTrayConfiguration_save
+};
 
 @class DigiScopeAppAppDelegate;
 
-@interface LiveViewController : UIViewController <UIPopoverControllerDelegate, UIPickerViewDelegate>{
-	
-	IBOutlet UIButton *recordOutlet;
-	IBOutlet UIButton *playOutlet;
-	IBOutlet UIButton *loadOutlet;
+@interface LiveViewController : UIViewController <UIPopoverControllerDelegate, UIPickerViewDelegate, AudioControllerDelegate>{
 	IBOutlet EAGLView *graphView;
+	IBOutlet UIView *trayView;
+	IBOutlet UIView *rateView;
 }
 
-@property (readonly, nonatomic) UIPopoverController *SavePopoverController;
-@property (readonly, nonatomic) UIViewController *SavePopoverViewController;
-@property (readonly, nonatomic) UIPopoverController *LoadPopoverController;
-@property (readonly, nonatomic) UIViewController *LoadPopoverViewController;
-@property (strong, nonatomic) UIButton *cancelRecording;
-@property (strong, nonatomic) UIButton *saveRecording;
-@property (strong, nonatomic) UIButton *exportRecording;
-@property (strong, nonatomic) UITextField *patientFirstName;
-@property (strong, nonatomic) UITextField *patientLastName;
-@property (strong, nonatomic) UIButton *cancelLoad;
-@property (strong, nonatomic) UIButton *selectRecording;
-@property (strong, nonatomic) UIButton *deleteRecording;
-@property (strong, nonatomic) UIPickerView *pickerView;
-@property (strong, nonatomic) UILabel *dateRecorded;
-@property (strong, nonatomic) UILabel *saveSuccessLabel;
-
-- (IBAction)loadAction:(id)sender;
-- (IBAction)recordAction:(id)sender;
-- (IBAction)playAction:(id)sender;
--(void)resetPlayButton;
--(void)cancelRecordingAction;
--(void)saveRecordingAction;
--(void)exportRecordingAction;
--(void)cancelLoadAction;
--(void)selectRecordingAction;
--(void)deleteRecordingAction;
--(void)resetSaveBanner;
-
+-(void)saveRecording;
+-(void)exportRecording;
+-(void)openRecording;
+-(void)deleteRecording;
+-(void)setTrayConfigurationTo: (kTrayConfiguration)config;
 
 
 @end

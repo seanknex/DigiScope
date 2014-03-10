@@ -8,6 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <AudioToolbox/AudioFile.h>
 #import <CoreAudio/CoreAudioTypes.h>
 #import <AVFoundation/AVFoundation.h>
 #import <MessageUI/MessageUI.h>
@@ -19,16 +20,44 @@
 
 @class DigiScopeAppAppDelegate;
 
-@protocol AudioControllerDelegate
+enum kAudioControllerNotification {
+	kAudioControllerNotification_None,
+	kAudioControllerNotification_ECGSaveRequest,
+	kAudioControllerNotification_ECGSaveInProgress,
+	kAudioControllerNotification_ECGSaveComplete,
+	kAudioControllerNotification_ECGPlayingStarted,
+	kAudioControllerNotification_ECGPlayingStopped,
+	kAudioControllerNotification_AudioSaveRequest,
+	kAudioControllerNotification_AudioSaveInProgress,
+	kAudioControllerNotification_AudioSaveComplete,
+	kAudioControllerNotification_AudioPlayingStarted,
+	kAudioControllerNotification_AudioPlayingStopped,
+	kAudioControllerNotification_ModeChange,
+	kAudioControllerNotification_SwipeOccurance,
+	kAudioControllerNotification_RateUpdate
+
+};
+
+enum kAudioControllerPreferences {
+	kAudioControllerPreferences_LineColor_Red,
+	kAudioControllerPreferences_LineColor_Green,
+	kAudioControllerPreferences_LineColor_Blue,
+	kAudioControllerPreferences_LineColor_Alpha,
+	kAudioControllerPreferences_BGColor_Red,
+	kAudioControllerPreferences_BGColor_Green,
+	kAudioControllerPreferences_BGColor_Blue,
+	kAudioControllerPreferences_BGColor_Alpha,
+	kAudioControllerPreferences_Scale,
+	kAudioControllerPreferences_Translation
+};
+
+@protocol AudioControllerDelegate <NSObject>
 @required
-- (void)drawView:(id)sender forTime:(NSTimeInterval)time;
 @optional
-- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event;
-- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event;
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)AudioControllerNotificationCenter: (kAudioControllerNotification)notification withObject:(id)object;
 @end
 
-@interface AudioController : NSObject<AVAudioRecorderDelegate, MFMailComposeViewControllerDelegate, EAGLViewDelegate>{
+@interface AudioController : NSObject<AVAudioRecorderDelegate, MFMailComposeViewControllerDelegate, EAGLViewDelegate, UIGestureRecognizerDelegate>{
 	AudioUnit ioUnit;
 	AVAudioRecorder *RecordingController;
 	AVAudioPlayer *PlayingController;
@@ -42,28 +71,31 @@
 	GLfloat* ECGoscilLine;
 	CAStreamBasicDescription	thruFormat;
     CAStreamBasicDescription    drawFormat;
+	CGRect viewFrame;
 }
 @property (strong, nonatomic) DigiScopeAppAppDelegate *myAppDelegate;
 @property (strong, nonatomic) NSMutableArray *fetchedRecordings;
 @property (strong, nonatomic) id viewDelegate;
-@property BOOL hardwareAttached;
+@property BOOL digiscopeHardwareAttached;
 @property BOOL loadFromData;
+@property BOOL notificationCenterAvailable;
 @property (nonatomic, retain)	EAGLView* view;
-@property (nonatomic, retain) UIViewController *requestingController;
+@property (weak) NSObject <AudioControllerDelegate> *ControllerDelegate;
 
 +(AudioController*)sharedInstance;
 -(void)initializeAudioUnit;
 +(BOOL)startAudioUnit;
 +(void)stopAudioUnit;
 +(void)initializeRecorder;
-+(void)startRecordingFromController: (UIViewController*)controller;
++(void)startRecording;
 +(void)stopRecording;
 +(void)exportRecording;
 +(BOOL)isRecording;
-+(void)initializePlayer;
-+(float)startPlaying;
++(void)startPlaying;
 +(void)stopPlaying;
 +(BOOL)isPlaying;
++(BOOL)isInECGMode;
++(BOOL)isReadyToSave;
 -(void)setUpAudioSession;
 +(void)setAudioSessionActive: (BOOL)setActive;
 +(BOOL)saveRecording :(NSString *) patientFirstName :(NSString *)patientLastName;
@@ -73,12 +105,12 @@
 +(NSString *)dateForFetchResult: (NSInteger)index;
 +(NSInteger)sizeOfFetchedArray;
 +(void)deleteRecordingAtFetchIndex: (NSInteger)index;
-+(void)emailMP3FileAtIndex :(NSInteger)index;
-+(void)emailMP3FileFromURL :(NSString *)patientFirstName :(NSString *)patientLastName;
-+(void)emailMP3FileWithData :(NSData*)fileData :(NSString*)fileName;
-+(void)setView: (UIView*)view;
++(void)emailFileAtIndex :(NSInteger)index;
++(void)emailFileWithData :(NSData*)fileData :(NSString*)fileName;
++(void)setView: (EAGLView*)view;
 -(void)setView:(EAGLView *)EAGLViewFrame;
-
-
++(void)setDelegate: (NSObject<AudioControllerDelegate>*)delegate;
++(void)switchMode;
+-(void)orientationChanged:(NSNotification *)notification;
 
 @end

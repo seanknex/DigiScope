@@ -8,6 +8,7 @@
 
 #import <UIKit/UIKit.h>
 
+
 @interface DigiScopeAppAppDelegate : UIResponder <UIApplicationDelegate>{
 	
 }
@@ -17,7 +18,6 @@
 @property (readonly, strong, nonatomic) NSPersistentStoreCoordinator *persistentStoreCoordinator;
 
 - (NSURL *)applicationDocumentsDirectory;
-
 @property (strong, nonatomic) UIWindow *window;
 
 @end

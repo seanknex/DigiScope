@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model userDefinedModelVersionIdentifier="" type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="3401" systemVersion="13A603" minimumToolsVersion="Xcode 4.3" macOSVersion="Automatic" iOSVersion="Automatic">
+<model userDefinedModelVersionIdentifier="" type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="3401" systemVersion="13B42" minimumToolsVersion="Xcode 4.3" macOSVersion="Automatic" iOSVersion="Automatic">
     <entity name="Recording" representedClassName="Recording" syncable="YES">
-        <attribute name="recordingData" optional="YES" attributeType="Binary" syncable="YES"/>
         <attribute name="recordingDate" optional="YES" attributeType="Date" syncable="YES"/>
+        <attribute name="recordingIsECG" optional="YES" attributeType="Boolean" syncable="YES"/>
+        <attribute name="recordingPath" optional="YES" attributeType="String" syncable="YES"/>
         <attribute name="recordingPatientFirstName" optional="YES" attributeType="String" syncable="YES"/>
         <attribute name="recordingPatientLastName" optional="YES" attributeType="String" syncable="YES"/>
     </entity>

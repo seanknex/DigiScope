@@ -8,168 +8,147 @@
 
 #import "LiveViewController.h"
 #import "DigiScopeAppAppDelegate.h"
-#import "AudioController.h"
+kTrayConfiguration currentTrayConfiguration = kTrayConfiguration_collapsed;
+float kKeyBoardOffset = 0;
 
 @implementation LiveViewController
-@synthesize SavePopoverController, SavePopoverViewController, cancelRecording, saveRecording, exportRecording, patientFirstName, patientLastName, LoadPopoverController, LoadPopoverViewController, cancelLoad, selectRecording, pickerView, deleteRecording, dateRecorded, saveSuccessLabel;
 
 -(void)viewDidAppear:(BOOL)animated{
+
+	// Register for Notifications
+	// Register for the events
+    [[NSNotificationCenter defaultCenter]
+	 addObserver:self
+	 selector:@selector (keyboardDidShow:)
+	 name: UIKeyboardDidShowNotification
+	 object:nil];
+    [[NSNotificationCenter defaultCenter]
+	 addObserver:self
+	 selector:@selector (keyboardDidHide:)
+	 name: UIKeyboardDidHideNotification
+	 object:nil];
 	
 	// Start Audio Unit
 	[AudioController startAudioUnit];
 	[AudioController setView:graphView];
+	[AudioController setDelegate:self];
 	
-	// Setup Save Popover Controller
-	SavePopoverViewController = [self.storyboard instantiateViewControllerWithIdentifier:@"SavePopoverViewController"];
-	SavePopoverController = [[UIPopoverController alloc] initWithContentViewController:SavePopoverViewController];
-	[SavePopoverController setDelegate:self];
-	[SavePopoverController setPopoverContentSize:[SavePopoverViewController.view viewWithTag:1].frame.size animated:NO];
-	patientFirstName = (UITextField *)[SavePopoverViewController.view viewWithTag:2];
-	patientLastName = (UITextField *)[SavePopoverViewController.view viewWithTag:3];
-	cancelRecording = (UIButton *)[SavePopoverViewController.view viewWithTag:4];
-	saveRecording = (UIButton *)[SavePopoverViewController.view viewWithTag:5];
-	exportRecording = (UIButton *)[SavePopoverViewController.view viewWithTag:6];
-	saveSuccessLabel = (UILabel *)[SavePopoverViewController.view viewWithTag:7];
-	[cancelRecording addTarget:self action:@selector(cancelRecordingAction) forControlEvents:UIControlEventTouchUpInside];
-	[saveRecording addTarget:self action:@selector(saveRecordingAction) forControlEvents:UIControlEventTouchUpInside];
-	[exportRecording addTarget:self action:@selector(exportRecordingAction) forControlEvents:UIControlEventTouchUpInside];
+	// Attach Swipe Recognizers
+	UISwipeGestureRecognizer *gesture = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(SwipeAction:)];
+	[gesture setDirection:UISwipeGestureRecognizerDirectionDown];
+	[self.view addGestureRecognizer:gesture];
 	
-	// Setup Picker View
-	LoadPopoverViewController = [self.storyboard instantiateViewControllerWithIdentifier:@"LoadPopoverViewController"];
-	LoadPopoverController = [[UIPopoverController alloc] initWithContentViewController:LoadPopoverViewController];
-	[LoadPopoverController setDelegate:self];
-	[LoadPopoverController setPopoverContentSize:[LoadPopoverViewController.view viewWithTag:1].frame.size animated:NO];
-	pickerView = (UIPickerView *)[LoadPopoverViewController.view viewWithTag:2];
-	cancelLoad = (UIButton *)[LoadPopoverViewController.view viewWithTag:3];
-	selectRecording = (UIButton *)[LoadPopoverViewController.view viewWithTag:4];
-	deleteRecording = (UIButton *)[LoadPopoverViewController.view viewWithTag:5];
-	dateRecorded = (UILabel *)[LoadPopoverViewController.view viewWithTag:6];
-	[cancelLoad addTarget:self action:@selector(cancelLoadAction) forControlEvents:UIControlEventTouchUpInside];
-	[selectRecording addTarget:self action:@selector(selectRecordingAction) forControlEvents:UIControlEventTouchUpInside];
-	[deleteRecording addTarget:self action:@selector(deleteRecordingAction) forControlEvents:UIControlEventTouchUpInside];
-	[pickerView setDelegate:self];
+	gesture = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(SwipeAction:)];
+	[gesture setDirection:UISwipeGestureRecognizerDirectionUp];
+	[self.view addGestureRecognizer:gesture];
+	
+	// Set Main Menu Tray Config
+	[self setTrayConfigurationTo:kTrayConfiguration_collapsed];
 	
 }
 
-- (IBAction)loadAction:(id)sender {
-	[AudioController loadAllRecordings];
-	[LoadPopoverController presentPopoverFromRect:loadOutlet.frame inView:self.view permittedArrowDirections:UIPopoverArrowDirectionDown animated:YES];
-	[pickerView reloadAllComponents];
-	
-	// Test if recordings exist
-	if ([AudioController sizeOfFetchedArray] == 0) {
-		[selectRecording setEnabled:NO];
-		[selectRecording setHidden:YES];
-		[deleteRecording setEnabled:NO];
-		[deleteRecording setHidden:YES];
-		[dateRecorded setText:@""];
+-(void)SwipeAction: (UISwipeGestureRecognizer*)gesture{
+	if ([gesture direction] == UISwipeGestureRecognizerDirectionUp)
+		currentTrayConfiguration = kTrayConfiguration_collapsed;
+	else if ([gesture direction] == UISwipeGestureRecognizerDirectionDown && currentTrayConfiguration ==kTrayConfiguration_collapsed){
+		currentTrayConfiguration = kTrayConfiguration_main;
 	}
+	[self setTrayConfigurationTo:currentTrayConfiguration];
+}
+
+
+-(void)saveRecording{
+	if (currentTrayConfiguration == kTrayConfiguration_main)
+		[self setTrayConfigurationTo:kTrayConfiguration_save];
 	else{
-		[selectRecording setEnabled:YES];
-		[selectRecording setHidden:NO];
-		[deleteRecording setEnabled:YES];
-		[deleteRecording setHidden:NO];
+		UITextField *patientFirstName = (UITextField*)[trayView viewWithTag:5];
+		UITextField *patientLastName = (UITextField*)[trayView viewWithTag:6];
+		if ([[patientFirstName text] isEqualToString:@""])
+			[patientFirstName setBackgroundColor:[UIColor redColor]];
+		if ([[patientLastName text] isEqualToString:@""])
+			[patientLastName setBackgroundColor:[UIColor redColor]];
 	}
-}
-
-- (IBAction)recordAction:(id)sender {
-	if ([AudioController isRecording] && ![AudioController isPlaying]) {
-		[AudioController stopRecording];
-		[recordOutlet setTitle:@"Record" forState:UIControlStateNormal];
-		[saveRecording setEnabled:YES];
-		[saveRecording setHidden:NO];
-		[exportRecording setEnabled:YES];
-		[exportRecording setHidden:NO];
-		[SavePopoverController presentPopoverFromRect:recordOutlet.frame inView:self.view permittedArrowDirections:UIPopoverArrowDirectionDown animated:YES];
-	}
-	else if(![AudioController isPlaying]){
-		[AudioController startRecordingFromController:self];
-		[recordOutlet setTitle:@"Stop" forState:UIControlStateNormal];
-	}
-	else
-		NSLog(@"\nError, cannot record while playing");
 	
 }
 
-- (IBAction)playAction:(id)sender {
-	if ([AudioController isPlaying] && ![AudioController isRecording]) {
-		[AudioController stopPlaying];
-		[playOutlet setTitle:@"Play" forState:UIControlStateNormal];
-	}
-	else if(![AudioController isRecording]){
-		float delay = [AudioController startPlaying];
-		[playOutlet setTitle:@"Stop" forState:UIControlStateNormal];
-		[self performSelector:@selector(resetPlayButton) withObject:nil afterDelay:delay];
-	}
-	else
-		NSLog(@"\nError, cannot play while recording");
+-(void)exportRecording{
+	UIPickerView *pickerView = (UIPickerView*)[trayView viewWithTag:5];
+	[AudioController emailFileAtIndex:[pickerView selectedRowInComponent:0]];
+	[self setTrayConfigurationTo:kTrayConfiguration_main];
 }
 
--(void)resetPlayButton{
-	[playOutlet setTitle:@"Play" forState:UIControlStateNormal];
-	[AudioController startAudioUnit];
-}
-
--(void)cancelRecordingAction{
-	[SavePopoverController dismissPopoverAnimated:YES];
-}
-
--(void)saveRecordingAction{
-	BOOL saveSuccessful;
-	saveSuccessful = [AudioController saveRecording:patientFirstName.text :patientLastName.text];
-	
-	if (saveSuccessful){
-		[saveSuccessLabel setText:@"Save Successful!"];
-		[saveSuccessLabel setBackgroundColor:[UIColor greenColor]];
-		[saveRecording setEnabled:NO];
-		[saveRecording setHidden:YES];
-	}
-	else{
-		[saveSuccessLabel setText:@"Save Failed!"];
-		[saveSuccessLabel setBackgroundColor:[UIColor redColor]];
-	}
-		
-	[saveSuccessLabel setHidden:NO];
-	[self performSelector:@selector(resetSaveBanner) withObject:nil afterDelay:3.0f];
-}
-
--(void)exportRecordingAction{
-	[SavePopoverController dismissPopoverAnimated:YES];
-	[AudioController emailMP3FileFromURL :patientFirstName.text :patientLastName.text];
-}
-
--(void)cancelLoadAction{
-	[LoadPopoverController dismissPopoverAnimated:YES];
-}
-
--(void)selectRecordingAction{
-	if ([AudioController sizeOfFetchedArray] != 0) {
+-(void)openRecording{
+	if (currentTrayConfiguration == kTrayConfiguration_main)
+		[self setTrayConfigurationTo:kTrayConfiguration_open];
+	else if (currentTrayConfiguration == kTrayConfiguration_open){
+		UIPickerView *pickerView = (UIPickerView*)[self.view viewWithTag:5];
 		[AudioController loadRecordingAtFetchIndex:[pickerView selectedRowInComponent:0]];
-		[LoadPopoverController dismissPopoverAnimated:YES];
-	}
-}
-
--(void)deleteRecordingAction{
-	
-	if ([AudioController sizeOfFetchedArray] != 0) {
-		[AudioController deleteRecordingAtFetchIndex:[pickerView selectedRowInComponent:0]];
-		[pickerView reloadAllComponents];
-	}
-	
-	// Test if the user removed the last component
-	if ([AudioController sizeOfFetchedArray] == 0) {
-		[selectRecording setEnabled:NO];
-		[selectRecording setHidden:YES];
-		[deleteRecording setEnabled:NO];
-		[deleteRecording setHidden:YES];
-		[dateRecorded setText:@""];
+		[self setTrayConfigurationTo:kTrayConfiguration_main];
 	}
 	
 }
 
+-(void)deleteRecording{
+	
+}
+
+#pragma mark Set Rate
+-(void)setRateTo: (int)rate{
+	int hundreds = rate/100;
+	int tens = (rate-hundreds*100)/10;
+	int ones = (rate-hundreds*100-tens*10);
+	if (rate >-1) {
+		if (rate<100)
+			[(UIImageView*)[rateView viewWithTag:100] setImage:[UIImage imageNamed:@"Number_B.png"]];
+		else
+			[(UIImageView*)[rateView viewWithTag:100] setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Number_%i.png",hundreds]]];
+		if (rate<10)
+			[(UIImageView*)[rateView viewWithTag:10] setImage:[UIImage imageNamed:@"Number_B.png"]];
+		else
+			[(UIImageView*)[rateView viewWithTag:10] setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Number_%i.png",tens]]];
+		if (rate < 1)
+			[(UIImageView*)[rateView viewWithTag:1] setImage:[UIImage imageNamed:@"Number_B.png"]];
+		else
+			[(UIImageView*)[rateView viewWithTag:1] setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Number_%i.png",ones]]];
+	}
+	else{
+		[(UIImageView*)[rateView viewWithTag:1] setImage:[UIImage imageNamed:@"Number_R.png"]];
+		[(UIImageView*)[rateView viewWithTag:10] setImage:[UIImage imageNamed:@"Number_R.png"]];
+		[(UIImageView*)[rateView viewWithTag:100] setImage:[UIImage imageNamed:@"Number_E.png"]];
+	}
+	
+}
+
+#pragma mark PickerView Functions
 // Number of components.
 -(NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView{
 	return 1;
+}
+
+-(UIView *)pickerView:(UIPickerView *)pickerView viewForRow:(NSInteger)row forComponent:(NSInteger)component reusingView:(UIView *)view
+{
+	UIView *masterView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, pickerView.frame.size.width, 44)];
+	UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, pickerView.frame.size.width*0.7, 44)];
+	label.backgroundColor = [UIColor clearColor];
+	label.textColor = [UIColor blackColor];
+	label.font = [UIFont fontWithName:@"AppleSDGothicNeo-SemiBold" size:18];
+	label.text = [AudioController titleForFetchResult:row];
+	[label setTextAlignment:NSTextAlignmentLeft];
+	[masterView addSubview:label];
+	
+	label = [[UILabel alloc] initWithFrame:CGRectMake(pickerView.frame.size.width*0.7, 0, pickerView.frame.size.width*0.3, 44)];
+	label.backgroundColor = [UIColor clearColor];
+	label.textColor = [UIColor blackColor];
+	label.font = [UIFont fontWithName:@"AppleSDGothicNeo-SemiBold" size:18];
+	label.text = [AudioController dateForFetchResult:row];
+	[label setTextAlignment:NSTextAlignmentRight];
+	[masterView addSubview:label];
+	
+	return masterView;
+		
+		
+	
+    
 }
 
 // Total rows in our component.
@@ -181,24 +160,258 @@
 }
 
 // Display each row's data.
+/*
 -(NSString *)pickerView:(UIPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component{
 	return [AudioController titleForFetchResult:row];
 }
-
+*/
 // Responding if the user picks a row
 - (void)pickerView:(UIPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component{
-	
-	if ([AudioController sizeOfFetchedArray] != 0)
-		[dateRecorded setText:[AudioController dateForFetchResult:row]];
-	else
-		[dateRecorded setText:@""];
 	
 	
 }
 
--(void)resetSaveBanner{
-	[saveSuccessLabel setHidden:YES];
+#pragma mark NotificationCenter
+
+-(void)AudioControllerNotificationCenter:(kAudioControllerNotification)notification withObject:(id)object{
+	
+	switch (notification) {
+
+		case kAudioControllerNotification_AudioSaveInProgress:
+			
+			break;
+		case kAudioControllerNotification_AudioSaveComplete:
+			
+			break;
+		case kAudioControllerNotification_AudioPlayingStarted:
+			
+			break;
+		case kAudioControllerNotification_AudioPlayingStopped:
+			[self setTrayConfigurationTo:currentTrayConfiguration];
+			break;
+		case kAudioControllerNotification_ECGSaveInProgress:
+			
+			break;
+		case kAudioControllerNotification_ECGSaveComplete:
+			
+			break;
+		case kAudioControllerNotification_SwipeOccurance:
+			if (object == nil || ![object isKindOfClass:[UISwipeGestureRecognizer class]]) break;
+			[self SwipeAction:object];
+			break;
+		case kAudioControllerNotification_ModeChange:
+			[self setTrayConfigurationTo:currentTrayConfiguration];
+			break;
+		case kAudioControllerNotification_RateUpdate:
+			if (object != nil) {
+				[self setRateTo:[(NSNumber*)object intValue]];
+			}
+			break;
+		default:
+			break;
+	}
+	
+	// Update Tray Configuration
+	[self setTrayConfigurationTo:currentTrayConfiguration];
+}
+
+-(void)setTrayConfigurationTo:(kTrayConfiguration)config{
+	UIButton *button1 = (UIButton*)[trayView viewWithTag:1];
+	UIButton *button2 = (UIButton*)[trayView viewWithTag:2];
+	UIButton *button3 = (UIButton*)[trayView viewWithTag:3];
+	UIButton *button4 = (UIButton*)[trayView viewWithTag:4];
+	
+	// Remove PickerViews and Text Views if Needed
+	UIView *viewExtra1 = [trayView viewWithTag:5];
+	UIView *viewExtra2 = [trayView viewWithTag:6];
+	if (viewExtra1 != nil) [viewExtra1 removeFromSuperview];
+	if (viewExtra2 != nil) [viewExtra2 removeFromSuperview];
+	
+	// Remove all events from buttons
+	[button1 removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
+	[button2 removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
+	[button3 removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
+	[button4 removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
+	
+	// Reveal and activate all buttons
+	[button1 setAlpha:1.0];
+	[button1 setEnabled:YES];
+	[button2 setAlpha:1.0];
+	[button2 setEnabled:YES];
+	[button3 setAlpha:1.0];
+	[button3 setEnabled:YES];
+	[button4 setAlpha:1.0];
+	[button4 setEnabled:YES];
+	
+	// Declare any variables used for configuration
+	NSString *fileName;
+	CGRect rect;
+	UIPickerView *pickerView;
+	UITextField	*textField;
+	float height = 265;
+	
+	switch (config) {
+		case kTrayConfiguration_collapsed:
+			rect = graphView.frame;
+			rect.size.height = height;
+			[UIView beginAnimations:nil context:NULL];
+			[UIView setAnimationDuration:0.2];
+			trayView.center = CGPointMake(trayView.center.x, 216-kKeyBoardOffset);
+			[graphView setFrame:rect];
+			rateView.alpha = 1;
+			[UIView commitAnimations];
+			break;
+		case kTrayConfiguration_main: // This Is the Configuration when a user initial reveals tools
+			// Set images
+			[button1 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"ECG_%i.png",(int)[AudioController isInECGMode]]] forState:UIControlStateNormal];
+			[button2 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Record_%i.png",(int)[AudioController isRecording]]] forState:UIControlStateNormal];
+			[button3 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Play_%i.png",(int)[AudioController isPlaying]]] forState:UIControlStateNormal];
+			if ([AudioController isReadyToSave]) fileName = @"Save.png";
+			else fileName = @"Open.png";
+			[button4 setImage:[UIImage imageNamed:fileName] forState:UIControlStateNormal];
+			
+			// Set Actions
+			[button1 addTarget:[AudioController class] action:@selector(switchMode) forControlEvents:UIControlEventTouchUpInside];
+			if ([AudioController isRecording]) [button2 addTarget:[AudioController class] action:@selector(stopRecording) forControlEvents:UIControlEventTouchUpInside];
+			else [button2 addTarget:[AudioController class] action:@selector(startRecording) forControlEvents:UIControlEventTouchUpInside];
+			if ([AudioController isPlaying]) [button3 addTarget:[AudioController class] action:@selector(stopPlaying) forControlEvents:UIControlEventTouchUpInside];
+			else [button3 addTarget:[AudioController class] action:@selector(startPlaying) forControlEvents:UIControlEventTouchUpInside];
+			if ([AudioController isReadyToSave]) [button4 addTarget:self action:@selector(saveRecording) forControlEvents:UIControlEventTouchUpInside];
+			else [button4 addTarget:self action:@selector(openRecording) forControlEvents:UIControlEventTouchUpInside];
+			
+			// Move Tray
+			rect = graphView.frame;
+			rect.size.height = height;
+			[UIView beginAnimations:nil context:NULL];
+			[UIView setAnimationDuration:0.2];
+			trayView.center = CGPointMake(trayView.center.x, 262-kKeyBoardOffset);
+			graphView.frame = rect;
+			rateView.alpha = 0;
+			[UIView commitAnimations];
+			
+			break;
+			
+		case kTrayConfiguration_open:// This Is the Configuration when a user presses Open
+			// Set Picker View
+			
+			rect = CGRectMake(20, 8, 280-40, 162);
+			pickerView = [[UIPickerView alloc] initWithFrame:rect];
+			[pickerView setDelegate:self];
+			[pickerView setTag:5];
+			[trayView addSubview:pickerView];
+			height = -16-pickerView.frame.size.height+button1.frame.origin.y-trayView.frame.size.height/2+344-graphView.frame.origin.y;
+			
+			// Set Picker View Data
+			[AudioController loadAllRecordings];
+			[pickerView reloadAllComponents];
+			
+			// Set Buttons and Images
+			[button1 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Delete.png"]] forState:UIControlStateNormal];
+			[button3 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Export.png"]] forState:UIControlStateNormal];
+			[button4 setImage:[UIImage imageNamed:@"Open.png"] forState:UIControlStateNormal];
+			[button2 setAlpha:0];
+			[button2 setEnabled:NO];
+			
+			// Set Actions
+			[button1 addTarget:self action:@selector(deleteRecording) forControlEvents:UIControlEventTouchUpInside];
+			[button3 addTarget:self action:@selector(exportRecording) forControlEvents:UIControlEventTouchUpInside];
+			[button4 addTarget:self action:@selector(openRecording) forControlEvents:UIControlEventTouchUpInside];
+			
+			// Move View to Open Position
+			rect = graphView.frame;
+			rect.size.height = height;
+			[UIView beginAnimations:nil context:NULL];
+			[UIView setAnimationDuration:0.2];
+			trayView.center = CGPointMake(trayView.center.x, 344-kKeyBoardOffset);
+			[graphView setFrame:rect];
+			rateView.alpha = 0;
+			[UIView commitAnimations];
+			break;
+		
+		case kTrayConfiguration_save: // This Is the Configuration when a user presses Save
+			
+			// Set Text Field
+			rect = CGRectMake(20, 104, 240, 30);
+			textField = [[UITextField alloc] initWithFrame:rect];
+			[textField setPlaceholder:@"First Name"];
+			[textField setBackgroundColor:[UIColor whiteColor]];
+			[textField setTextAlignment:NSTextAlignmentCenter];
+			[textField setBorderStyle:UITextBorderStyleRoundedRect];
+			[textField setTag:5];
+			[trayView addSubview:textField];
+			rect = CGRectMake(rect.origin.x, rect.origin.y+38, rect.size.width, rect.size.height);
+			textField = [[UITextField alloc] initWithFrame:rect];
+			[textField setPlaceholder:@"Last Name"];
+			[textField setBackgroundColor:[UIColor whiteColor]];
+			[textField setTextAlignment:NSTextAlignmentCenter];
+			[textField setBorderStyle:UITextBorderStyleRoundedRect];
+			[textField setTag:6];
+			[trayView addSubview:textField];
+			
+			// Set Buttons and Images
+			[button1 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Delete.png"]] forState:UIControlStateNormal];
+			[button2 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Play_%i.png",(int)[AudioController isPlaying]]] forState:UIControlStateNormal];
+			[button3 setImage:[UIImage imageNamed:[NSString stringWithFormat:@"Export.png"]] forState:UIControlStateNormal];
+			[button4 setImage:[UIImage imageNamed:@"Save.png"] forState:UIControlStateNormal];
+			
+			// Set Actions
+			[button1 addTarget:self action:@selector(deleteRecording) forControlEvents:UIControlEventTouchUpInside];
+			if ([AudioController isPlaying]) [button2 addTarget:[AudioController class] action:@selector(stopPlaying) forControlEvents:UIControlEventTouchUpInside];
+			else [button2 addTarget:[AudioController class] action:@selector(startPlaying) forControlEvents:UIControlEventTouchUpInside];
+			[button3 addTarget:self action:@selector(exportRecording) forControlEvents:UIControlEventTouchUpInside];
+			[button4 addTarget:self action:@selector(saveRecording) forControlEvents:UIControlEventTouchUpInside];
+			
+			// Move View to Open Position
+			rect = graphView.frame;
+			rect.size.height = height;
+			[UIView beginAnimations:nil context:NULL];
+			[UIView setAnimationDuration:0.2];
+			trayView.center = CGPointMake(trayView.center.x, 344-kKeyBoardOffset);
+			[graphView setFrame:rect];
+			rateView.alpha = 0;
+			[UIView commitAnimations];
+			
+			break;
+		default:
+			break;
+	}
+	
+	currentTrayConfiguration = config;
+}
+
+#pragma mark Keyboard Notifcation Center
+-(void) keyboardDidShow: (NSNotification *)notification{
+	
+	// Get keyboard info
+	NSDictionary* keyboardInfo = [notification userInfo];
+    NSValue* keyboardFrame = [keyboardInfo valueForKey:UIKeyboardFrameBeginUserInfoKey];
+    CGRect keyboardFrameRect = [keyboardFrame CGRectValue];
+	
+	kKeyBoardOffset = keyboardFrameRect.size.height;
+	
+	[UIView beginAnimations:Nil context:NULL];
+	[UIView setAnimationDuration:0.2];
+	for(UIView *subView in self.view.subviews)
+		subView.center = CGPointMake(subView.center.x, subView.center.y-keyboardFrameRect.size.height);
+	[UIView commitAnimations];
+}
+
+-(void) keyboardDidHide: (NSNotification *)notification{
+	
+	// Get keyboard info
+	NSDictionary* keyboardInfo = [notification userInfo];
+    NSValue* keyboardFrame = [keyboardInfo valueForKey:UIKeyboardFrameBeginUserInfoKey];
+    CGRect keyboardFrameRect = [keyboardFrame CGRectValue];
+	
+	kKeyBoardOffset = 0;
+	
+	[UIView beginAnimations:Nil context:NULL];
+	[UIView setAnimationDuration:0.2];
+	for(UIView *subView in self.view.subviews)
+		subView.center = CGPointMake(subView.center.x, subView.center.y+keyboardFrameRect.size.height);
+	[UIView commitAnimations];
 }
 
 
 @end
+
