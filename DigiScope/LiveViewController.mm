@@ -67,6 +67,11 @@ float kKeyBoardOffset = 0;
 			[patientFirstName setBackgroundColor:[UIColor redColor]];
 		if ([[patientLastName text] isEqualToString:@""])
 			[patientLastName setBackgroundColor:[UIColor redColor]];
+		if ([patientFirstName isFirstResponder]) [patientFirstName resignFirstResponder];
+		if ([patientLastName isFirstResponder]) [patientLastName resignFirstResponder];
+		if ([AudioController saveRecording:[patientFirstName text] :[patientLastName text]]) {
+			[self setTrayConfigurationTo:kTrayConfiguration_collapsed];
+		}
 	}
 	
 }
@@ -212,7 +217,10 @@ float kKeyBoardOffset = 0;
 	}
 	
 	// Update Tray Configuration
-	[self setTrayConfigurationTo:currentTrayConfiguration];
+	if (notification != kAudioControllerNotification_RateUpdate) {
+		[self setTrayConfigurationTo:currentTrayConfiguration];
+	}
+	
 }
 
 -(void)setTrayConfigurationTo:(kTrayConfiguration)config{

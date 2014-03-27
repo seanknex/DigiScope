@@ -74,58 +74,30 @@ int sizeOfHeartBuffer = 0;
 NSDate *dateLastUpdated;
 NSTimer *refreshTimer;
 
-
+// Filter Details
+kFilterType currentFilter = kFilterType_Audio;
 
 # pragma mark Filter Definitions
 
-// Coefficents B and A for Butterworth Filter (4th order max, band pass, low pass)
-// FilterCoefficients[kAudioOptimizedFor_][Sampling_Rate(8000,44100)][Coefficents(gain,BP:B&A,LP:B&A)][Coefficient Values]
-Float64 FilterCoefficients[1][2][5][5] =
+// Coefficents for Filtering
+Float64 FilterCoefficients[2][3][5] =
 {
-	// kAudioOptimizationOptions_Heart
+	// Audio Filter Coefficents (kFilterType_Audio)
 	{
-		// 8000 Hz Sampling Rate
-		{
-			{2000., 0., 0., 0., 0.}, // Filter Gain
-			{ 0.010432413371167, 0.0,  -0.020864826742333, 0.0, 0.010432413371167}, // Bandpass B
-			{1.00,  -3.684140456333678,   5.102011663126655,  -3.150585424636544, 0.7327260303718160}, // Bandpass A
-			{0.00000066171528800840, 0.00000264686115203361, 0.00000397029172805041, 0.00000264686115203361, 0.00000066171528800840}, // Lowpass B
-			{1.,  -3.848136880041180, 5.555835685441924, -3.566763664734585, 0.859075446778450} // Lowpass A
-		},
-		
-		// 44100 Hz Sampling Rate
-		{
-			{100000., 0., 0., 0., 0.}, // Filter Gain
-			{0.010432413371167, 0.0,  -0.020864826742333, 0.0, 0.010432413371167}, // Bandpass B
-			{1.00,  -3.684140456333678,   5.102011663126655,  -3.150585424636544, 0.7327260303718160}, // Bandpass A
-			{0.00000000076173778396083,   0.00000000304695113584330,   0.00000000457042670376495,   0.00000000304695113584330,   0.00000000076173778396083}, // Lowpass B
-			{1.,  -3.972449317496953,   5.917726838292429,  -3.918102679009986, 0.972825170402315} // Lowpass A
-		}
+		{1., 0., 0., 0., 0.}, // Filter Gain
+		{.9995896153676490,    3.998358461470596,    5.997537692205894, 3.998358461470596,     .9995896153676490}, /// kFilterCoefficients : kB
+		{1.000000000000000,     3.999179062279254,    5.997537523790353, 3.997537860661933,     .9991793991508444} // kFilterCoefficients : kA
+	},
+	// ECG Filter Coefficients (kFilterType_ECG)
+	{
+		{150., 0., 0., 0., 0.}, // Filter Gain
+		{.000000003728051659046550,    .00000001491220663618620,     .00000002236830995427930,     .00000001491220663618620,    .000000003728051659046550}, // kFilterCoefficients : kB
+		{1.000000000000000,    -3.958953318647084,     5.877700273536147,    -3.878530549051736,     .9597836538114997}, // kFilterCoefficients : kA
 	}
-};
-
-enum kAudioOptimizationOptions{
-	kAudioOptimizationOptions_Heart,
-	//kAudioOptimizationOptions_HeartMurmur,
-	//kAudioOptimizationOptions_Lungs,
-};
-
-enum kAudioOptimizationSampleRate{
-	kAudioOptimizationSampleRate_8000Hz,
-	kAudioOptimizationSampleRate_44100Hz,
-};
-
-enum kFilterCoefficients{
-	kAmp,
-	kB_Band,
-	kA_Band,
-	kB_Low,
-	kA_Low
+		
 };
 
 BOOL filterNeedsUpdateFlag = TRUE;
-kAudioOptimizationSampleRate filterRate;
-kAudioOptimizationOptions filterOption = kAudioOptimizationOptions_Heart;
 
 Float32 freq = 125.;
 OSStatus err;
@@ -207,109 +179,62 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 		tempBuffersCreated = TRUE;
 	}
 	
-	if (inputSaveOffset+inNumberFrames < 40000 && isRecording) {
-		memcpy(&inputSaveBuffer[inputSaveOffset], ioDataPtr, inNumberFrames*sizeof(Float32));
-		inputSaveOffset+=inNumberFrames;
-	}
-	
 	// Zero the Audio if Digiscope Hardware is not found
-	if (!THIS.digiscopeHardwareAttached)
-		memset(ioDataPtr, 0, ioData->mBuffers[0].mDataByteSize);
-	
-	if (inECGMode) {
-		for (int i = 4; i<inNumberFrames+4; i++)
-			ioDataPtr[i] = 5.000*ioDataPtr[i]; // Pre Amplify
-	}
-	else{
-		memcpy(&inputBuffer[4], ioDataPtr, ioData->mBuffers[0].mDataByteSize);
-		memset(ioDataPtr, 0, ioData->mBuffers[0].mDataByteSize);
-		Float32 *ioDataPtr2 = (Float32*)ioData->mBuffers[1].mData;
-		memset(ioDataPtr2, 0, ioData->mBuffers[1].mDataByteSize);
-		
-		/////////////////////////////////// Audio /////////////////////////////////////////////////////
-		
-		//The best yet ....
-		for (int i = 4; i<inNumberFrames+4; i++)
-			inputBuffer[i] = 160.000*inputBuffer[i]; // Pre Amplify
-		
-		
-		for (int i = 4; i<inNumberFrames+4; i++) {
-			BPBuffer[i] = FilterCoefficients[filterOption][filterRate][kB_Band][0] * inputBuffer[i]
-			+FilterCoefficients[filterOption][filterRate][kB_Band][1] * inputBuffer[i-1]
-			+FilterCoefficients[filterOption][filterRate][kB_Band][2] * inputBuffer[i-2]
-			+FilterCoefficients[filterOption][filterRate][kB_Band][3] * inputBuffer[i-3]
-			+FilterCoefficients[filterOption][filterRate][kB_Band][4] * inputBuffer[i-4]
-			-FilterCoefficients[filterOption][filterRate][kA_Band][1] * BPBuffer[i-1]
-			-FilterCoefficients[filterOption][filterRate][kA_Band][2] * BPBuffer[i-2]
-			-FilterCoefficients[filterOption][filterRate][kA_Band][3] * BPBuffer[i-3]
-			-FilterCoefficients[filterOption][filterRate][kA_Band][4] * BPBuffer[i-4];
-		}
-		
-		if (postFilterOffset+inNumberFrames < 40000 && isRecording) {
-			memcpy(&postFilterBuffer[postFilterOffset], BPBuffer, inNumberFrames*sizeof(Float32));
-			postFilterOffset+=inNumberFrames;
-		}
-		
-		memcpy(ioDataPtr, BPBuffer, ioData->mBuffers[0].mDataByteSize);
-		memcpy(&(BPBuffer)[0], &(BPBuffer)[inNumberFrames], 4*sizeof(Float32));
-		memcpy(&(inputBuffer)[0], &(inputBuffer)[inNumberFrames], 4*sizeof(Float32));
-		
-		
-		// Amplify Output
-		/*
-		static int calcAmpConst = 1;
-		static Float32 ampInitial = 0;
-		static Float32 ampFinal = 0.5;
-		static Float32 amplification = 0;
-		for (int i = 0; i<inNumberFrames; i++){
-			if (fabsf(ioDataPtr[i])>max)
-				max = fabsf(ioDataPtr[i]);
-		}
-		
-		if (calcAmpConst <= 0) {
-			ampInitial = ampFinal;
-			//if (max < 0.4 || max > 3.0)
-				//ampFinal = 0;
-			//else
-				ampFinal = 0.5;
-			max = 0;
-			calcAmpConst = 4;
+	if (isPlaying){
+		UInt32 numOfBytesToRead = ioData->mBuffers[0].mDataByteSize;
+		if (byteOffset+numOfBytesToRead < fileByteSize){
+			CheckError(AudioFileReadBytes(tempAudioFile, FALSE, byteOffset, &numOfBytesToRead, ioDataPtr), "Failed to Read Bytes");
+			byteOffset += numOfBytesToRead;
+			//memcpy(ioDataPtr2, ioDataPtr, numOfBytesToRead);
 		}
 		else
-			calcAmpConst--;
-		
-		amplification = ampFinal - (ampFinal - ampInitial)*exp2f(-2+0.5*calcAmpConst);
-		
+			isPlaying = FALSE;
+	}
+	else if (!THIS.digiscopeHardwareAttached)
+		memset(ioDataPtr, 0, ioData->mBuffers[0].mDataByteSize);
+	else{
 		for (int i = 0; i<inNumberFrames; i++)
-			ioDataPtr[i] = ioDataPtr2[i] = amplification * ioDataPtr[i];
-		*/
+            inputBuffer[4+i] = ioDataPtr[i];
+        
+        memset(ioDataPtr,0,inNumberFrames*sizeof(float));
+		float sum = 0;
 		
-		// Set aside data for recording
-		if (isRecording) {
-			CheckError(AudioFileWriteBytes(tempAudioFile, FALSE, byteOffset, &ioData->mBuffers[0].mDataByteSize, ioDataPtr),"Failed to Write Bytes");
-			byteOffset += (SInt64)ioData->mBuffers[0].mDataByteSize;
-		}
-		else if (isPlaying){
-			UInt32 numOfBytesToRead = ioData->mBuffers[0].mDataByteSize;
-			if (byteOffset+numOfBytesToRead < fileByteSize){
-				CheckError(AudioFileReadBytes(tempAudioFile, FALSE, byteOffset, &numOfBytesToRead, ioDataPtr), "Failed to Read Bytes");
-				byteOffset += numOfBytesToRead;
-				memcpy(ioDataPtr2, ioDataPtr, numOfBytesToRead);
-			}
-			else
-				isPlaying = FALSE;
-		}
+        for (int i = 4; i<inNumberFrames+4; i++){
+            BPBuffer[i] = FilterCoefficients[currentFilter][kB][0]*inputBuffer[i] +
+			FilterCoefficients[currentFilter][kB][1]*inputBuffer[i-1] +
+			FilterCoefficients[currentFilter][kB][2]*inputBuffer[i-2] +
+			FilterCoefficients[currentFilter][kB][3]*inputBuffer[i-3] +
+			FilterCoefficients[currentFilter][kB][4]*inputBuffer[i-4] -
+			FilterCoefficients[currentFilter][kA][1]*BPBuffer[i-1] -
+			FilterCoefficients[currentFilter][kA][2]*BPBuffer[i-2] -
+			FilterCoefficients[currentFilter][kA][3]*BPBuffer[i-3] -
+			FilterCoefficients[currentFilter][kA][4]*BPBuffer[i-4];
+            ioDataPtr[i-4] = BPBuffer[i];
+            sum += ioDataPtr[i-4];
+        }
+        sum = sum/inNumberFrames;
 		
+        for (int i = 0; i<inNumberFrames; i++)
+            ioDataPtr[i] = FilterCoefficients[currentFilter][kGain][0]*(ioDataPtr[i]-sum);
+        
 		
-		/////////////////////////////////// End Audio /////////////////////////////////////////////////////
+        memcpy(BPBuffer,&BPBuffer[inNumberFrames],4*sizeof(double));
+        memcpy(inputBuffer, &inputBuffer[inNumberFrames], 4*sizeof(double));
+	}
+	
+	if (isRecording) {
+		CheckError(AudioFileWriteBytes(tempAudioFile, FALSE, byteOffset, &ioData->mBuffers[0].mDataByteSize, ioDataPtr),"Failed to Write Bytes");
+		byteOffset += (SInt64)ioData->mBuffers[0].mDataByteSize;
 	}
 	
 	// Fill Heart Rate Buffer
+	/*
 	while (heartRateBufferBeingModified){} // Pause until it is no longer modified
 	heartRateBufferBeingModified = TRUE;
 	memcpy(heartRateBuffer, &heartRateBuffer[inNumberFrames], inNumberFrames*(kSizeOfHeartRateBuffer-1)*sizeof(Float32));
 	memcpy(&heartRateBuffer[(kSizeOfHeartRateBuffer-1)*inNumberFrames], ioDataPtr, inNumberFrames*sizeof(Float32));
 	heartRateBufferBeingModified = FALSE;
+	 */
 	
 	{
 		// The draw buffer is used to hold a copy of the most recent PCM data to be drawn
@@ -471,20 +396,6 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	CheckError(AudioUnitGetProperty(ioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1, &inputFormat, &propertySize), "Error AudioUnitGetProperty");
 	CheckError(AudioUnitSetProperty(ioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &inputFormat, propertySize), "Error AudioUnitSetProperty");
 	
-	// Set Filter Sample Rate
-	switch ((int)inputFormat.mSampleRate) {
-		case 8000:
-			filterRate = kAudioOptimizationSampleRate_8000Hz;
-			break;
-		case 44100:
-			filterRate = kAudioOptimizationSampleRate_44100Hz;
-			break;
-		default:
-			filterRate = kAudioOptimizationSampleRate_8000Hz;
-			break;
-	}
-	
-	
 	// Configure and Set the Render Callback function (needed to render the audio)
 	AURenderCallbackStruct	inputProc;
 	inputProc.inputProc = renderInput;
@@ -572,7 +483,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 	
 	// Set Input Settings
 	for (AVAudioSessionPortDescription *mDes in AudioSession.availableInputs) {
-		if ([mDes.portName isEqualToString:@"Digiscope"]|| [mDes.portName isEqualToString:@"DigiScopeTestBoard"]|| [mDes.portName isEqualToString:@"DigiScope"]){
+		if ([mDes.portName isEqualToString:@"Digiscope"]|| [mDes.portName isEqualToString:@"DigiScopeTestBoard"]|| [mDes.portName isEqualToString:@"DigiScope"]|| [mDes.portName isEqualToString:@"WT32-A"]|| [mDes.portName isEqualToString:@"Digiscope"]){
 			[AudioSession setPreferredInput:mDes error:&error];
 			digiscopeHardwareAttached = TRUE;
 		}
@@ -640,14 +551,14 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 			recordFormat.mBytesPerPacket = 4;
 			
 			NSURL *documentDirectory = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
-			NSURL *myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/TempFile.wav"]];
+			NSURL *myNSURL = [NSURL fileURLWithPath:[documentDirectory.path stringByAppendingString:@"/TempFile.caf"]];
 			CFURLRef myFileUrl = (__bridge CFURLRef)myNSURL;
-			CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileWAVEType, &recordFormat, kAudioFileFlags_EraseFile, &tempAudioFile),"Could not create a tempAudioFile for saving");
+			CheckError(AudioFileCreateWithURL(myFileUrl, kAudioFileCAFType, &recordFormat, kAudioFileFlags_EraseFile, &tempAudioFile),"Could not create a tempAudioFile for saving");
 			printf("\nRecording");
 			byteOffset = 0;
 			isRecording = TRUE;
 			if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_AudioSaveInProgress withObject:nil];}
-			
+			inputSaveOffset = 0;
 		}
 		else printf("\nError: Recorder is already running");
 		
@@ -669,13 +580,10 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 			recordingAwaitingSave = TRUE;
 			if([AudioController sharedInstance]->notificationCenterAvailable){[[AudioController sharedInstance]->ControllerDelegate AudioControllerNotificationCenter:kAudioControllerNotification_AudioSaveComplete withObject:nil];}
 			
-			for (int i = 0; i<40000; i++)
+			for (int i=0; i<40000; i++)
 				printf("\n%.9f",inputSaveBuffer[i]);
-			postFilterOffset = 0;
+				
 			
-			for (int i = 0; i<40000; i++)
-				printf("\n%.9f",postFilterBuffer[i]);
-			inputSaveOffset = 0;
 		}
 		else{
 			printf("\nError: Not Currently Recording");
@@ -1253,6 +1161,7 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 
 +(void)switchMode{
 	inECGMode = !inECGMode;
+	currentFilter = (kFilterType)inECGMode;
 	if (!inECGMode) {
 		// Erase current ECG data
 		for (int i = 0; i<ECGBufferLen; i++) {
@@ -1266,14 +1175,14 @@ static OSStatus renderInput(void *inRefCon, AudioUnitRenderActionFlags *ioAction
 #pragma mark Notifications
 -(void)orientationChanged:(NSNotification *)notification{
 	UIDeviceOrientation deviceOrientation = [UIDevice currentDevice].orientation;
-	if (UIDeviceOrientationIsLandscape(deviceOrientation)) {
+	if (UIDeviceOrientationIsLandscape(deviceOrientation) && UIDeviceOrientationIsPortrait(currentOrientation)) {
 		[[UIApplication sharedApplication] setStatusBarHidden:YES];
 		CGRect frame = CGRectMake(0, 0, [[UIScreen mainScreen] bounds].size.height, [[UIScreen mainScreen] bounds].size.width);
 		currentOrientation = UIDeviceOrientationLandscapeLeft;
 		[view setFrame:frame];
 		
 	}
-	else if (UIDeviceOrientationIsPortrait(deviceOrientation)){
+	else if (UIDeviceOrientationIsPortrait(deviceOrientation) && UIDeviceOrientationIsLandscape(currentOrientation)){
 		[[UIApplication sharedApplication] setStatusBarHidden:NO];
 		currentOrientation = UIDeviceOrientationPortrait;
 		[view setFrame:viewFrame];

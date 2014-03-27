@@ -51,6 +51,17 @@ enum kAudioControllerPreferences {
 	kAudioControllerPreferences_Translation
 };
 
+enum kFilterType{
+	kFilterType_Audio,
+	kFilterType_ECG
+};
+
+enum kFilterCoefficients{
+	kGain,
+	kB,
+	kA
+};
+
 @protocol AudioControllerDelegate <NSObject>
 @required
 @optional
